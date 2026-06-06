@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import api from "./api";
-import ActiveSessions from "./ActiveSessions";
+import Activesessions from "./Activesessions";
 import NotificationBell from "./NotificationBell";
 import ResourceArticleViewer from "./session/ResourceArticleViewer";
 
