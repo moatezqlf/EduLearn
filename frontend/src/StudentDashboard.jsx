@@ -507,7 +507,7 @@ export default function StudentDashboard() {
         {showDashboard && (
           <>
             {/* Active Sessions — shows live sessions from followed teachers */}
-            <ActiveSessions />
+            <Activesessions />
 
             {/* Stats */}
             <div style={{ display: "flex", gap: 14, marginBottom: 28 }} className="fade-up">

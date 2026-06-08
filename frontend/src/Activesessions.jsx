@@ -19,7 +19,7 @@ const phaseColors = {
   quiz:      { bg: "#FEE2E2", color: "#DC2626", label: "Quiz" },
 };
 
-export default function ActiveSessions() {
+export default function Activesessions() {
   useAuth();
   const navigate = useNavigate();
   const { socket } = useSocket();

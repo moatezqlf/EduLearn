@@ -382,3 +382,177 @@ Retourne UNIQUEMENT du JSON valide :
 }
 </output_format>`;
 }
+
+// ══════════════════════════════════════════════════════════════
+// 5. LearnLens — évaluation section manquante (grille IMRAD 1–4)
+// ══════════════════════════════════════════════════════════════
+
+const SECTION_CRITERIA = {
+  titre: [
+    { id: "C1", name: "Cohérence avec l'article (reflète ce que l'article rapporte réellement)", desc: "1: Trompeur / hors sujet | 2: Partiellement fidèle | 3: Fidèle | 4: Capture précisément le cœur de l'article" },
+    { id: "C2", name: "Concision", desc: "1: Trop long/confus | 2: Quelques mots de trop | 3: Adéquat | 4: Concis et percutant" },
+    { id: "C3", name: "Mots-clés / repérabilité", desc: "1: Absents | 2: Génériques | 3: Présents | 4: Bien choisis" },
+    { id: "C4", name: "Spécificité", desc: "1: Trop général | 2: Peu spécifique | 3: Spécifique | 4: Précis et distinctif" },
+  ],
+  abstract: [
+    { id: "C1", name: "Fidélité à l'article fourni (résume réellement l'intro, les méthodes, les résultats présents)", desc: "1: Contredit l'article | 2: Approximatif / omet l'essentiel | 3: Fidèle | 4: Synthèse exacte et fidèle" },
+    { id: "C2", name: "Autonomie", desc: "1: Incompréhensible seul | 2: Nécessite l'article | 3: Compréhensible seul | 4: Parfaitement autonome" },
+    { id: "C3", name: "Complétude (contexte, objectif, méthode, résultats, portée)", desc: "1: Plusieurs manques | 2: Un manque clé | 3: Tous présents | 4: Tous présents et bien dosés" },
+    { id: "C4", name: "Respect des contraintes (longueur, pas d'abréviation non définie)", desc: "1: Non respectées | 2: Partielles | 3: Respectées | 4: Irréprochable" },
+  ],
+  introduction: [
+    { id: "C1", name: "Raccord avec la suite (mène à la question que les méthodes/résultats présents traitent)", desc: "1: Décalée du reste | 2: Lien faible | 3: Cohérente avec la suite | 4: Prépare parfaitement la suite" },
+    { id: "C2", name: "Contexte / problème (le « verrou »)", desc: "1: Absent | 2: Confus | 3: Clair | 4: Clair et engageant" },
+    { id: "C3", name: "Justification / écart dans la littérature", desc: "1: Absente | 2: Évoquée | 3: Justifiée | 4: Solidement justifiée" },
+    { id: "C4", name: "Objectif / question annoncé(e)", desc: "1: Absent | 2: Implicite | 3: Annoncé | 4: Annoncé clairement et tôt" },
+  ],
+  methodes: [
+    { id: "C1", name: "Cohérence avec les résultats présents (les méthodes décrites peuvent produire ces résultats)", desc: "1: Incompatibles | 2: Partiellement compatibles | 3: Compatibles | 4: Parfaitement alignées sur les résultats" },
+    { id: "C2", name: "Reproductibilité", desc: "1: Impossible à refaire | 2: Détails insuffisants | 3: Refaisable | 4: Détails complets et précis" },
+    { id: "C3", name: "Justification des choix", desc: "1: Aucune | 2: Partielle | 3: Présente | 4: Solidement argumentée" },
+    { id: "C4", name: "Organisation", desc: "1: Confuse | 2: Inégale | 3: Logique | 4: Claire et structurée" },
+  ],
+  resultats: [
+    { id: "C1", name: "Cohérence méthodes → discussion (les résultats correspondent aux méthodes et à ce que la discussion interprète)", desc: "1: Incohérents | 2: Faiblement cohérents | 3: Cohérents | 4: Parfaitement alignés en amont et en aval" },
+    { id: "C2", name: "Faits sans interprétation", desc: "1: Mélangés à l'analyse | 2: Interprétation qui déborde | 3: Factuels | 4: Rigoureusement factuels" },
+    { id: "C3", name: "Figures / tableaux", desc: "1: Illisibles/absents | 2: Peu clairs | 3: Clairs | 4: Clairs, autonomes, sans redondance" },
+    { id: "C4", name: "Réponse aux questions posées", desc: "1: Hors sujet | 2: Partielle | 3: Répond | 4: Répond pleinement" },
+  ],
+  discussion: [
+    { id: "C1", name: "Fidélité aux résultats présents (interprète les résultats de l'article, n'en invente pas)", desc: "1: Invente / contredit | 2: S'éloigne par endroits | 3: Fidèle | 4: Strictement ancrée dans les résultats" },
+    { id: "C2", name: "Interprétation", desc: "1: Absente/erronée | 2: Superficielle | 3: Pertinente | 4: Fine, sans surinterprétation" },
+    { id: "C3", name: "Lien à la littérature + limites", desc: "1: Absents | 2: Faibles | 3: Présents | 4: Riches et honnêtes" },
+    { id: "C4", name: "Démontré vs suggéré", desc: "1: Confondus | 2: Flou | 3: Distingués | 4: Clairement distingués" },
+  ],
+  conclusion: [
+    { id: "C1", name: "Cohérence avec intro et résultats présents (répond à la question posée, reflète les résultats)", desc: "1: Décalée | 2: Lien partiel | 3: Cohérente | 4: Boucle parfaitement la question initiale" },
+    { id: "C2", name: "Réponse à la question initiale", desc: "1: Absente | 2: Partielle | 3: Claire | 4: Claire et nuancée" },
+    { id: "C3", name: "Messages-clés", desc: "1: Noyés | 2: Peu nets | 3: Identifiables | 4: Saillants et mémorables" },
+    { id: "C4", name: "Pas de résultat nouveau", desc: "1: En introduit | 2: Ambigu | 3: Respecté | 4: Respecté" },
+  ],
+};
+
+// Normalize section key to match SECTION_CRITERIA keys
+function normalizeSectionForCriteria(sectionKey) {
+  const s = (sectionKey || "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "") // strip accents
+    .trim();
+  if (s.includes("titre") || s.includes("title")) return "titre";
+  if (s.includes("abstract") || s.includes("resume") || s.includes("résumé")) return "abstract";
+  if (s.includes("intro")) return "introduction";
+  if (s.includes("meth") || s.includes("materiel")) return "methodes";
+  if (s.includes("result")) return "resultats";
+  if (s.includes("discuss")) return "discussion";
+  if (s.includes("conclu")) return "conclusion";
+  return s; // fallback: use as-is (may not match, will use intro criteria as default)
+}
+
+const SCORE_LABELS = { 1: "Insuffisant", 2: "À améliorer", 3: "Satisfaisant", 4: "Excellent" };
+
+const STYLE_INSTRUCTIONS = {
+  detaille: `Si "detaille" :
+  - Pour chaque critère, fournis une justification précise (2-3 phrases) en citant des passages de la production.
+  - Indique concrètement ce qui fonctionne et ce qui doit être amélioré.
+  - Propose une suggestion actionnable par critère noté ≤ 2.`,
+  socratique: `Si "socratique" :
+  - Pour chaque critère, formule 1 à 2 questions ouvertes guidantes qui amènent l'apprenant à identifier lui-même ses points faibles.
+  - Ne donne pas la réponse directement ; oriente la réflexion.`,
+  synthetique: `Si "synthetique" :
+  - Fournis un feedback global en 3-5 phrases maximum.
+  - Mentionne uniquement les 2 points forts principaux et les 2 axes d'amélioration prioritaires.
+  - Pas de détail par critère dans le feedback (les scores suffisent).`,
+};
+
+export function buildLearnLensEvalPrompt({
+  sectionKey = "Introduction",
+  feedbackStyle = "detaille",
+  articleContext = "",
+  studentAnswer = "",
+}) {
+  const sectionNorm = normalizeSectionForCriteria(sectionKey);
+  const criteria = SECTION_CRITERIA[sectionNorm] || SECTION_CRITERIA.introduction;
+  const styleKey = (feedbackStyle || "detaille").toLowerCase();
+  const styleInstr = STYLE_INSTRUCTIONS[styleKey] || STYLE_INSTRUCTIONS.detaille;
+
+  const criteriaBlock = criteria
+    .map(c => `${c.id}. ${c.name}\n   ${c.desc}`)
+    .join("\n");
+
+  const criteriaSchema = criteria.map(c => (
+    `    { "id": "${c.id}", "name": "${c.name}", "score": <1|2|3|4>, "label": "<${Object.values(SCORE_LABELS).join("|")}>", "feedback": "<texte adapté au style>" }`
+  )).join(",\n");
+
+  return `Tu es un évaluateur expert en rédaction scientifique, spécialisé dans la structure IMRAD et les conventions de publication académique. Tu évalues la production d'un apprenant dans un contexte pédagogique universitaire.
+
+══════════════════════════════════════════════
+CONTEXTE DE L'EXERCICE
+══════════════════════════════════════════════
+
+L'apprenant a reçu un article scientifique réel dont la section "${sectionKey}" a été retirée. Il devait rédiger cette section manquante. Tu dois évaluer sa production selon deux dimensions :
+1. QUALITÉ INTRINSÈQUE : la section est-elle bien rédigée selon les standards académiques du genre ?
+2. COHÉRENCE AVEC L'ARTICLE : s'accorde-t-elle avec les sections présentes (mêmes objectifs, mêmes résultats, même terminologie) ?
+
+══════════════════════════════════════════════
+ARTICLE ORIGINAL (sections fournies à l'apprenant)
+══════════════════════════════════════════════
+
+${articleContext?.trim() || "[Aucun contexte d'article fourni — évalue uniquement la qualité intrinsèque]"}
+
+══════════════════════════════════════════════
+PRODUCTION DE L'APPRENANT (section "${sectionKey}")
+══════════════════════════════════════════════
+
+${studentAnswer?.trim() || "[Aucune réponse soumise]"}
+
+══════════════════════════════════════════════
+ÉCHELLE DE NOTATION
+══════════════════════════════════════════════
+
+Chaque critère est noté de 1 à 4 :
+- 1 = Insuffisant
+- 2 = À améliorer
+- 3 = Satisfaisant
+- 4 = Excellent
+
+══════════════════════════════════════════════
+GRILLE DE CRITÈRES — section "${sectionKey}"
+══════════════════════════════════════════════
+
+Utilise UNIQUEMENT ces 4 critères :
+
+${criteriaBlock}
+
+══════════════════════════════════════════════
+STYLE DE FEEDBACK : ${styleKey}
+══════════════════════════════════════════════
+
+${styleInstr}
+
+══════════════════════════════════════════════
+FORMAT DE SORTIE
+══════════════════════════════════════════════
+
+Réponds UNIQUEMENT avec un objet JSON valide, sans backticks, sans texte avant ou après :
+
+{
+  "section": "${sectionKey}",
+  "feedbackStyle": "${styleKey}",
+  "overallScore": <moyenne arithmétique des 4 scores arrondie à 1 décimale>,
+  "criteria": [
+${criteriaSchema}
+  ],
+  "summary": "<synthèse globale 2-4 phrases : points forts, faiblesses majeures, prochaine étape>",
+  "strengths": ["<point fort 1>", "<point fort 2>"],
+  "improvements": ["<amélioration prioritaire 1>", "<amélioration prioritaire 2>"]
+}
+
+RÈGLES IMPÉRATIVES :
+1. Évalue UNIQUEMENT les 4 critères listés ci-dessus.
+2. overallScore = moyenne arithmétique des 4 scores, arrondie à 1 décimale.
+3. Un score de 4 est réservé aux productions réellement excellentes.
+4. Si la production est vide ou < 20 mots, attribue 1 à tous les critères et explique pourquoi.
+5. Ancre chaque évaluation dans des éléments concrets du texte de l'apprenant ET de l'article.
+6. Rédige tout en français.
+7. Renvoie UNIQUEMENT le JSON, rien d'autre.`;
+}

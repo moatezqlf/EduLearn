@@ -1,411 +1,10 @@
-// // Socket.server.js
-// import { Server } from "socket.io";
-// import Anthropic from "@anthropic-ai/sdk";
-// import { Session, Submission } from "./Session.model.js";
-// import { buildFeedbackPrompt } from "./prompts.js";
-
-// let _client = null;
-// function getClient() {
-//   if (!_client) _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-//   return _client;
-// }
-
-// let _io = null;
-// export function getIO() { return _io; }
-
-// export function initSocket(server) {
-//   const io = new Server(server, {
-//     cors: {
-//       origin: process.env.CLIENT_URL || "http://localhost:5173",
-//       methods: ["GET", "POST"],
-//       credentials: true,
-//     },
-//   });
-//   _io = io;
-//   registerSessionEvents(io);
-//   console.log("Socket.io initialized");
-//   return io;
-// }
-
-// // ── Prompt builder ───────────────────────────────────────────────────────────
-// // function buildSessionFeedbackPrompt({ question, instructions, examples, answer }) {
-// //   return `You are an expert scientific writing coach. Evaluate the student's answer with detailed, constructive feedback.
-
-// // CONTEXT:
-// // - Question: "${question}"
-// // ${instructions ? `- Teacher Instructions: "${instructions}"` : ""}
-// // ${examples     ? `- Model Answer Example:\n"${examples}"`   : ""}
-
-// // STUDENT'S ANSWER:
-// // "${answer}"
-
-// // Respond ONLY with valid JSON (no markdown, no backticks, no extra text):
-
-// // {
-// //   "score": <integer 0-20>,
-// //   "level": "<Excellent|Good|Satisfactory|Needs Improvement|Weak>",
-// //   "basic": "<3-4 sentence overall assessment explaining WHY the answer deserves this score>",
-// //   "criteriaScores": {
-// //     "clarity": { "score": <0-5>, "comment": "<why this score for clarity>" },
-// //     "structure": { "score": <0-5>, "comment": "<why this score for structure>" },
-// //     "argumentation": { "score": <0-5>, "comment": "<why this score for argumentation>" },
-// //     "scientific": { "score": <0-5>, "comment": "<why this score for scientific accuracy>" }
-// //   },
-// //   "strengths": ["<specific strong point 1>", "<specific strong point 2>"],
-// //   "weaknesses": ["<specific weak point 1>", "<specific weak point 2>"],
-// //   "corrections": [
-// //     {
-// //       "original": "<exact problematic sentence from the answer>",
-// //       "issue": "<explain why this is weak>",
-// //       "suggestion": "<improved version of that sentence>"
-// //     }
-// //   ],
-// //   "rewrite": "<a full improved version of the complete answer, showing the student how it should be written>"
-// // }
-
-// // SCORING RUBRIC (each /5, total /20):
-// // - Clarity (0-5): Is the writing clear, concise, and easy to understand?
-// // - Structure (0-5): Does it have a logical intro, body with arguments, and conclusion?
-// // - Argumentation (0-5): Are claims supported with evidence, examples, or reasoning?
-// // - Scientific Accuracy (0-5): Is the content factually correct and scientifically precise?
-
-// // Be specific and pedagogically constructive. Name exact sentences. Give actionable advice.`;
-// // }
-
-
-
-
-// // ═════════════════════════════════════════════════════════════════════════════
-// function registerSessionEvents(io) {
-//   io.on("connection", (socket) => {
-//     console.log("Socket connected:", socket.id);
-
-//     // ── Teacher joins ────────────────────────────────────────────────────────
-//     socket.on("teacher_join", ({ sessionId }) => {
-//       const room = `session:${sessionId}`;
-//       socket.join(room);
-//       socket.data = { role: "teacher", sessionId: String(sessionId) };
-//       console.log("Teacher joined room:", room);
-//     });
-
-//     // ── Student joins via code ───────────────────────────────────────────────
-//     socket.on("student_join", async ({ code, name }, callback) => {
-//       console.log("student_join event:", code, name);
-//       try {
-//         if (!callback || typeof callback !== "function") {
-//           console.log("ERROR: no callback from client");
-//           return;
-//         }
-
-//         const session = await Session.findOne({ code: code.toUpperCase() });
-//         if (!session) {
-//           console.log("Session not found for code:", code);
-//           return callback({ success: false, message: "Code invalide" });
-//         }
-
-//         if (session.phase === "done") {
-//           return callback({ success: false, message: "Session terminée" });
-//         }
-
-//         const sid = session._id.toString();
-//         const room = `session:${sid}`;
-//         const student = { id: socket.id, name, socketId: socket.id };
-
-//         // Add student to DB
-//         await Session.findByIdAndUpdate(session._id, {
-//           $push: { students: student },
-//         });
-
-//         // Join socket room
-//         socket.join(room);
-//         socket.data = { role: "student", sessionId: sid, studentId: socket.id, name };
-//         console.log(`Student "${name}" joined room ${room}`);
-
-//         // Send session info to this student
-//         socket.emit("session_info", {
-//           sessionId: sid,
-//           question: session.question,
-//           instructions: session.instructions || "",
-//           example: session.examples || "",
-//           videoUrl: session.videoUrl,
-//         });
-
-//         // Send current phase so student doesn't stay on "waiting" if phase already advanced
-//         socket.emit("phase_changed", { phase: session.phase });
-
-//         // Notify everyone (teacher + all students) about updated student list
-//         const updated = await Session.findById(session._id);
-//         io.to(room).emit("student_joined", { students: updated.students });
-//         console.log(`Emitted student_joined to ${room}, total: ${updated.students.length}`);
-
-//         callback({ success: true, studentId: socket.id, sessionId: sid });
-//       } catch (err) {
-//         console.error("student_join error:", err);
-//         if (callback) callback({ success: false, message: err.message });
-//       }
-//     });
-
-//     // ── Teacher advances phase ───────────────────────────────────────────────
-//     socket.on("advance_phase", async ({ sessionId, phase }) => {
-//       const sid = String(sessionId);
-//       const room = `session:${sid}`;
-//       console.log(`advance_phase: room=${room}, phase=${phase}`);
-
-//       await Session.findByIdAndUpdate(sid, { phase });
-//       io.to(room).emit("phase_changed", { phase });
-
-//       // Log how many sockets are in this room
-//       const sockets = await io.in(room).fetchSockets();
-//       console.log(`Room ${room} has ${sockets.length} sockets`);
-
-//       if (phase === "review") await assignGroups(io, sid);
-//       if (phase === "results") await emitResults(io, sid);
-//     });
-
-//     // ── Next round ───────────────────────────────────────────────────────────
-//     socket.on("next_round", async ({ sessionId, round }) => {
-//       const sid = String(sessionId);
-//       const session = await Session.findByIdAndUpdate(
-//         sid,
-//         { currentRound: round, phase: "writing" },
-//         { new: true }
-//       );
-
-//       const groups = rotateReceivers(session.groups, round);
-//       await Session.findByIdAndUpdate(sid, { groups });
-
-//       for (const group of groups) {
-//         const receiver = group.members.find(m => m.isReceiver);
-//         const prevSubmission = await Submission.findOne({
-//           sessionId: sid,
-//           studentId: receiver.id,
-//           round: round - 1,
-//         });
-
-//         for (const member of group.members) {
-//           const memberSocket = io.sockets.sockets.get(member.socketId);
-//           if (memberSocket) {
-//             memberSocket.emit("round_changed", {
-//               round,
-//               receiver: { id: receiver.id, name: receiver.name },
-//               receiverAnswer: prevSubmission?.content || "",
-//             });
-//           }
-//         }
-//       }
-
-//       io.to(`session:${sid}`).emit("phase_changed", { phase: "writing" });
-//     });
-
-//     // ── Submit answer ────────────────────────────────────────────────────────
-//     socket.on("submit_answer", async ({ sessionId, studentId, answer, round }) => {
-//       const sid = String(sessionId);
-//       await Submission.findOneAndUpdate(
-//         { sessionId: sid, studentId, round },
-//         { content: answer, studentName: socket.data?.name, submittedAt: new Date() },
-//         { upsert: true, new: true }
-//       );
-
-//       const session = await Session.findById(sid);
-//       const count = await Submission.countDocuments({ sessionId: sid, round });
-//       const allAnswers = await Submission.find({ sessionId: sid });
-
-//       io.to(`session:${sid}`).emit("answer_submitted", {
-//         studentId,
-//         answeredCount: count,
-//         totalStudents: session.students.length,
-//         answers: allAnswers,
-//       });
-//     });
-
-//     // ── Request AI feedback ──────────────────────────────────────────────────
-//     // socket.on("request_ai_feedback", async ({ sessionId, studentId, answer, round }) => {
-//     //   try {
-//     //     const sid = String(sessionId);
-//     //     const session = await Session.findById(sid);
-
-//     //     const prompt = buildSessionFeedbackPrompt({
-//     //       question: session.question,
-//     //       instructions: session.instructions,
-//     //       examples: session.examples,
-//     //       answer,
-//     //     });
-
-//     //     console.log("Requesting AI feedback for student:", studentId);
-
-//     //     const response = await client.messages.create({
-//     //       model: "claude-sonnet-4-20250514",
-//     //       max_tokens: 1500,
-//     //       messages: [{ role: "user", content: prompt }],
-//     //     });
-
-//     //     let parsed;
-//     //     try {
-//     //       parsed = JSON.parse(response.content[0].text.replace(/```json|```/g, "").trim());
-//     //     } catch {
-//     //       parsed = { basic: response.content[0].text, corrections: [], rewrite: "", score: 10 };
-//     //     }
-
-//     //     await Submission.findOneAndUpdate(
-//     //       { sessionId: sid, studentId, round },
-//     //       { aiFeedback: parsed, aiScore: parsed.score },
-//     //       { upsert: true }
-//     //     );
-
-//     //     socket.emit("ai_feedback", { feedback: parsed, score: parsed.score });
-//     //     console.log("AI feedback sent, score:", parsed.score);
-
-//     //     const allAnswers = await Submission.find({ sessionId: sid });
-//     //     io.to(`session:${sid}`).emit("answer_submitted", { answers: allAnswers });
-//     //   } catch (err) {
-//     //     console.error("AI feedback error:", err.message);
-//     //     socket.emit("error", { message: "AI feedback failed: " + err.message });
-//     //   }
-//     // });
-
-//     // // ── Submit peer review ───────────────────────────────────────────────────
-//     // socket.on("submit_review", async ({ sessionId, studentId, round, ratings, comment }) => {
-//     //   const sid = String(sessionId);
-//     //   const session = await Session.findById(sid);
-//     //   const group = session.groups.find(g => g.members.some(m => m.id === studentId));
-//     //   const receiver = group?.members.find(m => m.isReceiver);
-
-//     //   if (receiver) {
-//     //     await Submission.findOneAndUpdate(
-//     //       { sessionId: sid, studentId: receiver.id, round },
-//     //       {
-//     //         $push: {
-//     //           peerReviews: { reviewerId: studentId, ratings, comment, submittedAt: new Date() },
-//     //         },
-//     //       },
-//     //       { upsert: true }
-//     //     );
-//     //   }
-
-//     //   io.to(`session:${sid}`).emit("review_submitted", { studentId });
-//     // });
-
-//     // ── Request AI feedback ──────────────────────────────────────────────────
-//     socket.on("request_ai_feedback", async ({ sessionId, studentId, answer, round }) => {
-//       try {
-//         const sid = String(sessionId);
-//         const session = await Session.findById(sid);
-
-//         // Build prompt using session config (docType, level, feedbackStyle, language)
-//         const prompt = buildFeedbackPrompt(answer, session.question, {
-//           ...(session.sessionConfig?.toObject ? session.sessionConfig.toObject() : session.sessionConfig || {}),
-//           instructions: session.instructions,
-//           examples:     session.examples,
-//         });
-
-//         console.log("Requesting AI feedback for student:", studentId, "config:", session.sessionConfig);
-
-//         // FIX: use getClient() lazy init, not undefined `client`
-//         const response = await getClient().messages.create({
-//           model: "claude-sonnet-4-20250514",
-//           max_tokens: 2000,
-//           messages: [{ role: "user", content: prompt }],
-//         });
-
-//         let parsed;
-//         try {
-//           parsed = JSON.parse(response.content[0].text.replace(/```json|```/g, "").trim());
-//         } catch {
-//           parsed = { basic: response.content[0].text, corrections: [], rewrite: "", score: 10 };
-//         }
-
-//         await Submission.findOneAndUpdate(
-//           { sessionId: sid, studentId, round },
-//           { aiFeedback: parsed, aiScore: parsed.score },
-//           { upsert: true }
-//         );
-
-//         socket.emit("ai_feedback", { feedback: parsed, score: parsed.score });
-//         console.log("AI feedback sent, score:", parsed.score);
-
-//         const allAnswers = await Submission.find({ sessionId: sid });
-//         io.to(`session:${sid}`).emit("answer_submitted", { answers: allAnswers });
-//       } catch (err) {
-//         console.error("AI feedback error:", err.message);
-//         socket.emit("error", { message: "AI feedback failed: " + err.message });
-//       }
-//     });
-//     // ── Submit revision ──────────────────────────────────────────────────────
-//     socket.on("submit_revision", async ({ sessionId, studentId, round, revision }) => {
-//       const sid = String(sessionId);
-//       await Submission.findOneAndUpdate(
-//         { sessionId: sid, studentId, round },
-//         { $push: { revisions: { content: revision, submittedAt: new Date() } } }
-//       );
-//       socket.emit("revision_saved");
-//     });
-
-//     // ── Disconnect ───────────────────────────────────────────────────────────
-//     socket.on("disconnect", async () => {
-//       console.log("Socket disconnected:", socket.id);
-//       if (socket.data?.sessionId && socket.data?.role === "student") {
-//         const sid = socket.data.sessionId;
-//         await Session.findByIdAndUpdate(sid, {
-//           $pull: { students: { socketId: socket.id } },
-//         });
-//         const session = await Session.findById(sid);
-//         if (session) {
-//           io.to(`session:${sid}`).emit("student_joined", { students: session.students });
-//         }
-//       }
-//     });
-//   });
-// }
-
-// // ── Helpers ──────────────────────────────────────────────────────────────────
-
-// async function assignGroups(io, sessionId) {
-//   const session = await Session.findById(sessionId);
-//   const students = session.students.map(s => s.toObject ? s.toObject() : { ...s });
-
-//   // Fisher-Yates shuffle
-//   for (let i = students.length - 1; i > 0; i--) {
-//     const j = Math.floor(Math.random() * (i + 1));
-//     [students[i], students[j]] = [students[j], students[i]];
-//   }
-
-//   const groups = [];
-//   for (let i = 0; i < students.length; i += 4) {
-//     const members = students.slice(i, i + 4).map((s, idx) => ({
-//       id: s.id, name: s.name, socketId: s.socketId,
-//       isReceiver: idx === 0,
-//     }));
-//     groups.push({ members });
-//   }
-
-//   const updated = await Session.findByIdAndUpdate(sessionId, { groups }, { returnDocument: "after" });
-//   io.to(`session:${sessionId}`).emit("groups_formed", { groups: updated.groups });
-//   console.log(`Groups formed: ${groups.length} groups`);
-// }
-
-// function rotateReceivers(groups, round) {
-//   return groups.map(group => {
-//     const members = (group.members || []).map((m, idx) => {
-//       const mObj = m.toObject ? m.toObject() : { ...m };
-//       return { ...mObj, isReceiver: idx === (round - 1) % (group.members.length || 1) };
-//     });
-//     return { members };
-//   });
-// }
-
-// async function emitResults(io, sessionId) {
-//   const submissions = await Submission.find({ sessionId }).sort({ aiScore: -1 });
-//   io.to(`session:${sessionId}`).emit("results", {
-//     topAnswer: submissions[0] || null,
-//     allFeedbacks: submissions,
-//   });
-// }
 
 // Socket.server.js
 import { Server } from "socket.io";
 import Anthropic from "@anthropic-ai/sdk";
 import { Session, SessionSubmission } from "./Session.model.js";
 import jwt from "jsonwebtoken";
+import { buildLearnLensEvalPrompt } from "./prompts/sessionWritingEval.js";
 
 let _client = null;
 function getClient() {
@@ -449,13 +48,40 @@ function normalizeAiFeedback(rawText) {
   const fallback = { basic: String(rawText || "").trim(), corrections: [], rewrite: "", score: null };
   try {
     const parsed = JSON.parse(String(rawText || "").replace(/```json|```/g, "").trim());
+
+    // ── LearnLens format: overallScore (1–4) + criteria[] ──
+    if (parsed.overallScore != null && Array.isArray(parsed.criteria)) {
+      const avgScore = Number(parsed.overallScore);
+      // Convert 1–4 scale to /20 (multiply by 5)
+      const score20 = Math.round(avgScore * 5);
+      // Build criteriaScores map from criteria[] for backward compat display
+      const criteriaScores = {};
+      for (const c of parsed.criteria) {
+        criteriaScores[c.id] = {
+          score: c.score,       // 1–4
+          scoreMax: 4,
+          label: c.label,
+          name: c.name,
+          comment: c.feedback,
+        };
+      }
+      return {
+        score: score20,
+        overallScore: avgScore,
+        basic: parsed.summary || "",
+        criteriaScores,
+        strengths: parsed.strengths || [],
+        feedForward: parsed.improvements || [],
+        weaknesses: parsed.improvements || [],
+        corrections: [],
+        rewrite: "",
+        learnlens: parsed,  // keep raw for richer display
+      };
+    }
+
+    // ── Legacy/generic format ──
     const criteria = parsed.criteriaScores || {};
-    const hasDetailed =
-      parsed.detailedEvaluation ||
-      parsed.noteGlobale != null ||
-      parsed.globalScore != null ||
-      parsed.suggestionsPrecises ||
-      parsed.suggestions;
+    const hasDetailed = parsed.detailedEvaluation || parsed.noteGlobale != null || parsed.globalScore != null;
 
     const score =
       Number.isFinite(Number(parsed.score)) ? Number(parsed.score)
@@ -472,28 +98,24 @@ function normalizeAiFeedback(rawText) {
       return Math.max(0, Math.min(5, n));
     };
 
-    const enriched = {
+    return {
       score,
       level: parsed.level || "",
       basic: parsed.basic || parsed.summary || "",
       criteriaScores: Object.keys(criteria).length ? criteria : {
         scientific: { score: as05(details, "qualiteScientifique"), comment: "Scientific quality" },
-        structure: { score: as05(details, "logique"), comment: "Logical structure" },
-        coherence: { score: as05(details, "coherence"), comment: "Coherence" },
-        academicWriting: { score: as05(details, "academicWriting"), comment: "Academic style" },
-        argumentation: { score: as05(details, "argumentation"), comment: "Argumentation" },
-        originality: { score: as05(details, "originality"), comment: "Originality" },
-        citationQuality: { score: as05(details, "citationQuality"), comment: "Citation quality" },
+        structure:  { score: as05(details, "logique"),             comment: "Logical structure" },
+        argumentation: { score: as05(details, "argumentation"),    comment: "Argumentation" },
+        clarity:    { score: as05(details, "clarity"),             comment: "Clarity" },
       },
       strengths: parsed.strengths || parsed.forces || [],
       weaknesses: parsed.weaknesses || parsed.faiblesses || [],
+      feedForward: parsed.feedForward || [],
       suggestions: parsed.suggestionsPrecises || parsed.suggestions || [],
       corrections: parsed.corrections || [],
       rewrite: parsed.rewrite || "",
       detailedEvaluation: hasDetailed ? (parsed.detailedEvaluation || details) : undefined,
     };
-
-    return enriched;
   } catch {
     return fallback;
   }
@@ -958,19 +580,31 @@ function registerSessionEvents(io) {
         const session = await Session.findById(sid);
         const rid = canonicalStudentId(socket, socket.data?.name);
 
-        const prompt = buildInlineFeedbackPrompt({
-          question: session.question,
-          instructions: session.instructions,
-          examples: session.examples,
-          answer,
-          docType: session.docType || session.sessionConfig?.docType || "article",
-          level: session.level || "Master 2 / PFE",
-          language: session.language || "FR + EN (auto)",
-          selectedSections: session.selectedSections || [],
-          evaluationCriteria: session.evaluationCriteria || {},
-        });
+        const sectionKey = session.missingSection || session.currentSectionKey
+          || (session.selectedSections || [])[0] || "Introduction";
+        const hasArticleContext = Boolean(session.articleTextContent?.trim());
+        const feedbackStyle = session.sessionConfig?.feedbackStyle || "detaille";
 
-        console.log("Requesting AI feedback for student:", studentId || rid);
+        const prompt = hasArticleContext
+          ? buildLearnLensEvalPrompt({
+              sectionKey,
+              feedbackStyle,
+              articleContext: session.articleTextContent,
+              studentAnswer: answer,
+            })
+          : buildInlineFeedbackPrompt({
+              question: session.question,
+              instructions: session.instructions,
+              examples: session.examples,
+              answer,
+              docType: session.docType || session.sessionConfig?.docType || "article",
+              level: session.level || "Master 2 / PFE",
+              language: session.language || "FR + EN (auto)",
+              selectedSections: session.selectedSections || [],
+              evaluationCriteria: session.evaluationCriteria || {},
+            });
+
+        console.log(`Requesting AI feedback [${hasArticleContext ? "LearnLens" : "generic"}] for student:`, studentId || rid);
 
         const rawText = await callAiModel(prompt);
         const parsed = normalizeAiFeedback(rawText);

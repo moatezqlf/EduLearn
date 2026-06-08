@@ -818,11 +818,42 @@ export default function StudentSession() {
                       <div style={nw.aiFeedback}>
                         <div style={nw.aiFeedbackHeader}>
                           <span style={{ fontSize: 15, fontWeight: 700 }}>Évaluation IA</span>
-                          <span style={nw.scoreChip}>{aiFeedback.score}/20</span>
+                          {aiFeedback.feedback?.learnlens
+                            ? <span style={{ ...nw.scoreChip, background: "#dcfce7", color: "#166534" }}>
+                                {aiFeedback.feedback.overallScore}/4
+                              </span>
+                            : <span style={nw.scoreChip}>{aiFeedback.score}/20</span>
+                          }
                         </div>
                         {aiFeedback.feedback?.basic && <p style={{ fontSize: 14, color: "#1e293b", lineHeight: 1.7, margin: "12px 0 0" }}>{aiFeedback.feedback.basic}</p>}
 
-                        {aiFeedback.feedback?.criteriaScores && Object.keys(aiFeedback.feedback.criteriaScores).length > 0 && (
+                        {/* ── LearnLens criteria (1–4 scale) ── */}
+                        {aiFeedback.feedback?.learnlens?.criteria?.length > 0 && (
+                          <div style={{ marginTop: 16 }}>
+                            <div style={nw.layerLabel}>Grille d&apos;évaluation — {aiFeedback.feedback.learnlens.section}</div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
+                              {aiFeedback.feedback.learnlens.criteria.map(c => {
+                                const pct = ((c.score - 1) / 3) * 100;
+                                const color = c.score >= 4 ? "#22c55e" : c.score === 3 ? "#3b82f6" : c.score === 2 ? "#f59e0b" : "#ef4444";
+                                return (
+                                  <div key={c.id} style={{ background: "#f8fafc", borderRadius: 10, padding: "12px 16px", border: "1px solid #e2e8f0" }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                                      <span style={{ fontSize: 12, fontWeight: 700, color: "#374151", flex: 1 }}>{c.id}. {c.name}</span>
+                                      <span style={{ fontSize: 12, fontWeight: 800, color, marginLeft: 8, whiteSpace: "nowrap" }}>{c.score}/4 — {c.label}</span>
+                                    </div>
+                                    <div style={{ height: 6, background: "#e2e8f0", borderRadius: 99, overflow: "hidden" }}>
+                                      <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 99, transition: "width 0.6s" }} />
+                                    </div>
+                                    {c.feedback && <p style={{ fontSize: 12, color: "#475569", margin: "8px 0 0", lineHeight: 1.6 }}>{c.feedback}</p>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ── Generic criteria (0–5 scale, legacy) ── */}
+                        {!aiFeedback.feedback?.learnlens && aiFeedback.feedback?.criteriaScores && Object.keys(aiFeedback.feedback.criteriaScores).length > 0 && (
                           <div style={{ marginTop: 16 }}>
                             <div style={nw.layerLabel}>Critères détaillés</div>
                             <div style={styles.criteriaGrid}>
