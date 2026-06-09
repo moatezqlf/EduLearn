@@ -277,6 +277,7 @@ export default function TeacherSession() {
   const [students, setStudents]       = useState([]);
   const [answers, setAnswers]         = useState([]);
   const [groups, setGroups]           = useState([]);
+  const [groupsOpen, setGroupsOpen]   = useState(false);
   const [connected, setConnected]     = useState(false);
   const [loading, setLoading]         = useState(false);
   const [activeTab, setActiveTab]     = useState("config");
@@ -494,7 +495,7 @@ export default function TeacherSession() {
           <div style={styles.tabs}>
             {["config", "live", "analytics"].map(t => (
               <button key={t} style={{ ...styles.tab, ...(activeTab === t ? styles.tabActive : {}) }} onClick={() => setActiveTab(t)}>
-                {{ config: "⚙️ Config", live: "📡 Live", analytics: "📊 Analytics" }[t]}
+                {{ config: "⚙️ Config", live: "🎓 Learning Process", analytics: "📊 Analytics" }[t]}
               </button>
             ))}
           </div>
@@ -806,6 +807,26 @@ export default function TeacherSession() {
 
           {activeTab === "live" && (
             <div style={styles.card}>
+              {/* Groups toggle button */}
+              <button
+                type="button"
+                onClick={() => setGroupsOpen(o => !o)}
+                style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, border: "1.5px solid #e2e8f0", background: groupsOpen ? "#f0f9ff" : "#f8fafc", cursor: "pointer", marginBottom: 16, fontFamily: "inherit", transition: "all .15s" }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 16 }}>👥</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>Groupes</span>
+                  {groups.length > 0 && (
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", background: "#6366f1", padding: "1px 8px", borderRadius: 999 }}>{groups.length}</span>
+                  )}
+                  {groups.length === 0 && (
+                    <span style={{ fontSize: 11, color: "#94a3b8" }}>— se forment automatiquement</span>
+                  )}
+                </div>
+                <span style={{ fontSize: 10, color: "#94a3b8", transition: "transform .2s", display: "inline-block", transform: groupsOpen ? "rotate(90deg)" : "rotate(0deg)" }}>▶</span>
+              </button>
+              {groupsOpen && <div style={{ marginBottom: 16 }}><GroupsPanel groups={groups} /></div>}
+
               <h2 style={styles.cardTitle}>Session Control</h2>
               <div style={styles.stepper}>
                 {PHASES.slice(1).map((p, i) => (
@@ -834,7 +855,6 @@ export default function TeacherSession() {
                 </>
               )}
               {phase !== 1 && <div style={styles.progressLabel}>{liveStatusText}</div>}
-              <GroupsPanel groups={groups} />
               {/* End session */}
               <div style={{ marginTop: 20, borderTop: "1px solid #fee2e2", paddingTop: 16 }}>
                 <button
