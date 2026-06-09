@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./AuthContext";
+import { LanguageProvider } from "./i18n/LanguageContext";
 import ProtectedRoute    from "./ProtectedRoute";
 import LoginPage         from "./LoginPage";
 import StudentDashboard  from "./StudentDashboard";
@@ -45,6 +46,7 @@ function RootRedirect() {
 export default function App() {
   return (
     <BrowserRouter>
+      <LanguageProvider>
       <AuthProvider>
         <Routes>
           <Route path="/login"        element={<LoginPage />} />
@@ -82,6 +84,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>
+      </LanguageProvider>
     </BrowserRouter>
   );
 }

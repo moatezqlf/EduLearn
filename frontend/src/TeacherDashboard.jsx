@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
+import { useLang, LangToggle } from "./i18n/LanguageContext";
 import api from "./api";
 
 const fmt = (iso) => {
@@ -20,12 +21,12 @@ const statusCfg = {
 };
 
 const navItems = [
-  { id: "dashboard",  label: "Dashboard",    icon: "⊞" },
-  { id: "courses",    label: "My Courses",   icon: "◫" },
-  { id: "students",   label: "Students",     icon: "⊕" },
-  { id: "history",    label: "Historique Session", icon: "◉" },
-  { id: "communication", label: "Communication", icon: "💬", route: "/teacher/communication" },
-  { id: "profile",    label: "Profile",      icon: "⊙" },
+  { id: "dashboard",     key: "nav_dashboard",     icon: "⊞" },
+  { id: "courses",       key: "nav_courses",        icon: "◫" },
+  { id: "students",      key: "nav_students",       icon: "⊕" },
+  { id: "history",       key: "nav_history",        icon: "◉" },
+  { id: "communication", key: "nav_communication",  icon: "💬", route: "/teacher/communication" },
+  { id: "profile",       key: "nav_profile",        icon: "⊙" },
 ];
 
 const css = `
@@ -68,6 +69,25 @@ const css = `
   .dropdown-item:hover{background:#F3F4F6}
   .input-field{width:100%;background:#F9FAFB;border:1.5px solid #EAECF0;border-radius:10px;padding:10px 14px;font-size:13px;color:#1A1D23;font-family:inherit;outline:none;transition:border-color .15s}
   .input-field:focus{border-color:#6C63FF;background:#fff}
+  /* ── Responsive ── */
+  .sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:39}
+  @media(max-width:768px){
+    .sidebar-overlay.open{display:block}
+    .sidebar-mobile{position:fixed!important;left:0;top:0;bottom:0;z-index:40;box-shadow:4px 0 24px rgba(0,0,0,.12)}
+    .main-pad{padding:16px 14px!important}
+    .stats-row{flex-wrap:wrap!important}
+    .stats-row .stat-card{min-width:calc(50% - 6px)!important}
+    .sub-row{grid-template-columns:36px 1fr 80px!important}
+    .sub-col-hide{display:none!important}
+    .header-row{flex-wrap:wrap;gap:10px}
+    .header-row h1{font-size:18px!important}
+    .courses-grid{grid-template-columns:1fr!important}
+  }
+  @media(max-width:480px){
+    .stats-row .stat-card{min-width:100%!important}
+    .main-pad{padding:12px 10px!important}
+    .header-row h1{font-size:16px!important}
+  }
 `;
 
 const colors  = ["#6C63FF","#0EA5E9","#10B981","#F59E0B","#EC4899"];
@@ -98,9 +118,21 @@ const Spark = ({ data, color, height = 60 }) => {
 
 export default function TeacherDashboard() {
   const { user, logout } = useAuth();
+  const { t } = useLang();
   const navigate = useNavigate();
   const [activeNav,    setActiveNav]    = useState("dashboard");
-  const [sidebarOpen,  setSidebarOpen]  = useState(true);
+  const [isMobile,     setIsMobile]     = useState(() => window.innerWidth < 769);
+  const [sidebarOpen,  setSidebarOpen]  = useState(() => window.innerWidth >= 769);
+
+  useEffect(() => {
+    const onResize = () => {
+      const mobile = window.innerWidth < 769;
+      setIsMobile(mobile);
+      if (!mobile) setSidebarOpen(true);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
   const [activeTab,    setActiveTab]    = useState("all");
   const [selected,     setSelected]     = useState(null);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -190,32 +222,40 @@ export default function TeacherDashboard() {
     finally { setSavingProfile(false); }
   };
 
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? t("greeting_morning") : hour < 18 ? t("greeting_afternoon") : t("greeting_evening");
+
   const statCards = [
-    { label: "Total Students",   value: analytics ? String(analytics.students)   : "—", sub: "enrolled",       icon: "⊕", accent: "#6C63FF" },
-    { label: "My Courses",       value: String(courses.length),                          sub: "total",          icon: "◫", accent: "#0EA5E9" },
-    { label: "Pending Reviews",  value: String(pending),                                 sub: "need attention", icon: "✎", accent: "#EF4444", urgent: pending > 0 },
-    { label: "Total Submissions",value: analytics ? String(analytics.submissions) : "—", sub: "all time",      icon: "◎", accent: "#10B981" },
+    { label: t("nav_students"),      value: analytics ? String(analytics.students)   : "—", sub: t("stat_active"),    icon: "⊕", accent: "#6C63FF" },
+    { label: t("nav_courses"),       value: String(courses.length),                          sub: "total",             icon: "◫", accent: "#0EA5E9" },
+    { label: t("status_pending"),    value: String(pending),                                 sub: t("btn_refresh"),    icon: "✎", accent: "#EF4444", urgent: pending > 0 },
+    { label: t("submissions"),       value: analytics ? String(analytics.submissions) : "—", sub: "all time",          icon: "◎", accent: "#10B981" },
   ];
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", fontFamily: "'DM Sans','Segoe UI',sans-serif", background: "#F7F8FC", color: "#1A1D23" }}>
 
+      {/* Mobile overlay */}
+      {isMobile && (
+        <div className={`sidebar-overlay${sidebarOpen ? " open" : ""}`} onClick={() => setSidebarOpen(false)} />
+      )}
+
       {/* Sidebar */}
-      <aside style={{ width: sidebarOpen ? 220 : 64, transition: "width .25s ease", background: "#fff", borderRight: "1px solid #EAECF0", display: "flex", flexDirection: "column", padding: "20px 12px", flexShrink: 0, overflow: "hidden" }}>
+      <aside className={isMobile ? "sidebar-mobile" : ""} style={{ width: sidebarOpen ? 220 : (isMobile ? 0 : 64), transition: "width .25s ease", background: "#fff", borderRight: "1px solid #EAECF0", display: "flex", flexDirection: "column", padding: sidebarOpen ? "20px 12px" : (isMobile ? 0 : "20px 8px"), flexShrink: 0, overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 6px 20px", borderBottom: "1px solid #F3F4F6", marginBottom: 12 }}>
           <div style={{ width: 32, height: 32, background: "#1A1D23", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, fontFamily: "'Syne',sans-serif", fontWeight: 700, flexShrink: 0 }}>E</div>
           {sidebarOpen && <span style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 15, whiteSpace: "nowrap" }}>EduLearn</span>}
         </div>
         {sidebarOpen && (
           <div style={{ margin: "0 6px 14px", padding: "6px 10px", background: "#F0FDF4", borderRadius: 8, fontSize: 11, color: "#166534", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#10B981", display: "inline-block" }}/> Teacher Account
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#10B981", display: "inline-block" }}/> {t("role_teacher")}
           </div>
         )}
         <nav style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
           {navItems.map(item => (
-            <div key={item.id} className={`nav-item ${activeNav === item.id ? "active" : ""}`} onClick={() => item.route ? navigate(item.route) : setActiveNav(item.id)}>
+            <div key={item.id} className={`nav-item ${activeNav === item.id ? "active" : ""}`} onClick={() => { item.route ? navigate(item.route) : setActiveNav(item.id); if (isMobile) setSidebarOpen(false); }}>
               <span style={{ fontSize: 15, width: 20, textAlign: "center" }}>{item.icon}</span>
-              {sidebarOpen && <span>{item.label}</span>}
+              {sidebarOpen && <span>{t(item.key)}</span>}
               {sidebarOpen && item.id === "subs" && pending > 0 && (
                 <span style={{ marginLeft: "auto", background: "#EF4444", color: "#fff", fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 99 }}>{pending}</span>
               )}
@@ -228,26 +268,27 @@ export default function TeacherDashboard() {
           </div>
           {sidebarOpen && (
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "#1A1D23", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.name || "Teacher"}</div>
-              <div style={{ fontSize: 11, color: "#9CA3AF" }}>Teacher</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#1A1D23", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.name || t("role_teacher")}</div>
+              <div style={{ fontSize: 11, color: "#9CA3AF" }}>{t("role_teacher")}</div>
             </div>
           )}
-          {sidebarOpen && <button onClick={logout} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: "#9CA3AF", padding: 4 }} title="Logout">⏻</button>}
+          {sidebarOpen && <button onClick={logout} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: "#9CA3AF", padding: 4 }} title={t("btn_logout")}>⏻</button>}
         </div>
       </aside>
 
       {/* Main */}
-      <main style={{ flex: 1, overflow: "auto", padding: "28px 32px" }}>
+      <main className="main-pad" style={{ flex: 1, overflow: "auto", padding: "28px 32px" }}>
 
         {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
+        <div className="header-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
           <div>
-            <p style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 3 }}>{new Date().toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</p>
+            <p style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 3 }}>{new Date().toLocaleDateString("fr-FR", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</p>
             <h1 style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 24, color: "#1A1D23", letterSpacing: "-.02em" }}>
-              Welcome, {user?.name?.split(" ")[0] || "Teacher"} 👩‍🏫
+              {greeting}, {user?.name?.split(" ")[0] || t("role_teacher")} 👩‍🏫
             </h1>
           </div>
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <LangToggle />
             <button className="btn-sm" onClick={() => setSidebarOpen(v => !v)} style={{ padding: "8px 12px" }}>☰</button>
             <button className="btn-sm" onClick={fetchAll} style={{ padding: "8px 12px" }}>↻</button>
 
@@ -255,14 +296,14 @@ export default function TeacherDashboard() {
             <div className="dropdown" onClick={e => e.stopPropagation()}>
               <button className="btn-primary" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}
                 onClick={() => setShowDropdown(v => !v)}>
-                + New ▾
+                + {t("btn_new")} ▾
               </button>
               {showDropdown && (
                 <div className="dropdown-menu">
                   <div className="dropdown-item" onClick={() => { setShowDropdown(false); navigate("/teacher/courses/new"); }}>
                     <span style={{ fontSize: 16 }}>◫</span>
                     <div>
-                      <p style={{ fontWeight: 600, fontSize: 13 }}>New Course</p>
+                      <p style={{ fontWeight: 600, fontSize: 13 }}>{t("new_course")}</p>
                       <p style={{ fontSize: 11, color: "#9CA3AF" }}>Create a full course with modules</p>
                     </div>
                   </div>
