@@ -219,6 +219,7 @@ export default function TeacherSession() {
   const [sectionGuidance, setSectionGuidance]           = useState({});
   const [articleTextContent, setArticleTextContent]     = useState("");
   const [articleCutterOpen, setArticleCutterOpen]       = useState(false);
+  const [sectionTimings, setSectionTimings]             = useState({}); // { "Introduction": 30 } (minutes)
 
   const toggleSection = (name) => {
     setSelectedSections(prev =>
@@ -362,11 +363,13 @@ export default function TeacherSession() {
   };
 
   const handleCreateSession = async () => {
-    if (!question.trim()) return;
+    // Auto-generate question from missingSection if not set
+    const finalQuestion = question.trim()
+      || `Rédigez la section « ${missingSection} » de l'article selon les critères définis.`;
     setLoading(true);
     try {
       const formData = new FormData();
-      formData.append("question", question);
+      formData.append("question", finalQuestion);
       formData.append("instructions", instructions);
       formData.append("examples", examples);
       formData.append("criteria", JSON.stringify(FIXED_CRITERIA.map(c => c.id)));
@@ -394,6 +397,7 @@ export default function TeacherSession() {
       ));
       formData.append("missingSection", missingSection || selectedSections[0] || "");
       formData.append("sectionGuidance", JSON.stringify(sectionGuidance));
+      formData.append("sectionTimings", JSON.stringify(sectionTimings));
       if (articleTextContent) formData.append("articleTextContent", articleTextContent);
       if (videoFile) formData.append("video", videoFile);
       if (articleFile) formData.append("article", articleFile);
@@ -419,8 +423,12 @@ export default function TeacherSession() {
       setSessionId(newSessionId);
       setCurrentSectionKey(missingSection || selectedSections[0] || "");
       socketRef.current.emit("teacher_join", { sessionId: newSessionId });
+      // Auto-start writing phase immediately after session creation
+      setTimeout(() => {
+        socketRef.current.emit("advance_phase", { sessionId: newSessionId, phase: "writing" });
+      }, 800);
       setActiveTab("live");
-      setPhase(0);
+      setPhase(1);
     } catch (err) {
       console.error(err);
     } finally {
@@ -433,6 +441,13 @@ export default function TeacherSession() {
     const next = phase + 1;
     socketRef.current.emit("advance_phase", { sessionId, phase: PHASE_NAMES[next] });
     setPhase(next);
+  };
+
+  const handleEndSession = () => {
+    if (!sessionId) return;
+    if (!window.confirm("Terminer définitivement cette session ? Les étudiants verront les résultats finaux.")) return;
+    socketRef.current.emit("end_session", { sessionId });
+    setPhase(4);
   };
 
   const answeredCount = Array.isArray(answers)
@@ -489,10 +504,9 @@ export default function TeacherSession() {
             <div style={styles.wizardSteps}>
               {[
                 { n: 1, label: "Type de ressource" },
-                { n: 2, label: "Parcours pédagogique" },
-                { n: 3, label: "Problème & consignes" },
+                { n: 2, label: "Parcours & lancement" },
               ].map(({ n, label }) => (
-                <div key={n} style={{ display: "flex", alignItems: "center", flex: n < 3 ? 1 : undefined }}>
+                <div key={n} style={{ display: "flex", alignItems: "center", flex: n < 2 ? 1 : undefined }}>
                   <div style={{
                     ...styles.wizardStepDot,
                     background: setupStep >= n ? "#6366f1" : "#e2e8f0",
@@ -503,7 +517,7 @@ export default function TeacherSession() {
                     color: setupStep === n ? "#6366f1" : setupStep > n ? "#1e293b" : "#94a3b8",
                     fontWeight: setupStep === n ? 700 : 500,
                   }}>{label}</span>
-                  {n < 3 && <div style={{ ...styles.wizardStepLine, background: setupStep > n ? "#6366f1" : "#e2e8f0" }} />}
+                  {n < 2 && <div style={{ ...styles.wizardStepLine, background: setupStep > n ? "#6366f1" : "#e2e8f0" }} />}
                 </div>
               ))}
             </div>
@@ -731,83 +745,58 @@ export default function TeacherSession() {
                 </div>
               </div> */}
 
+              {/* Timing par phase */}
+              {missingSection && (
+                <div style={{ marginTop: 20, padding: "16px 20px", background: "#fafafa", borderRadius: 12, border: "1px solid #e2e8f0" }}>
+                  <h3 style={{ ...styles.sectionHeader, marginTop: 0, marginBottom: 4 }}>⏱ Durée par phase</h3>
+                  <p style={{ fontSize: 12, color: "#64748b", marginBottom: 16, marginTop: 0 }}>
+                    Définissez le temps de chaque phase pour la section <strong>{missingSection}</strong>. Laissez vide = sans limite.
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {[
+                      { key: `${missingSection}_read`, icon: "📖", label: "Lecture", hint: "Temps pour lire l'article complet", color: "#0ea5e9", bg: "#f0f9ff" },
+                      { key: missingSection,            icon: "✍️", label: "Rédaction", hint: "Temps pour écrire la section", color: "#6366f1", bg: "#eef2ff" },
+                      { key: `${missingSection}_review`, icon: "👥", label: "Feedback pairs", hint: "Temps pour la phase de relecture", color: "#f59e0b", bg: "#fffbeb" },
+                    ].map(({ key, icon, label, hint, color, bg }) => (
+                      <div key={key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", background: bg, borderRadius: 10, border: `1.5px solid ${color}30` }}>
+                        <span style={{ fontSize: 18, minWidth: 24 }}>{icon}</span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>{label}</div>
+                          <div style={{ fontSize: 11, color: "#94a3b8" }}>{hint}</div>
+                        </div>
+                        <input
+                          type="number"
+                          min={1}
+                          max={120}
+                          value={sectionTimings[key] || ""}
+                          onChange={e => setSectionTimings(prev => ({
+                            ...prev,
+                            [key]: e.target.value === "" ? undefined : Math.max(1, Math.min(120, Number(e.target.value) || 0)),
+                          }))}
+                          placeholder="—"
+                          style={{ width: 64, padding: "6px 10px", borderRadius: 8, border: `1.5px solid ${color}60`, fontSize: 14, textAlign: "center", outline: "none", background: "#fff" }}
+                        />
+                        <span style={{ fontSize: 12, color: "#94a3b8", minWidth: 24 }}>min</span>
+                        {sectionTimings[key] > 0 && (
+                          <span style={{ fontSize: 12, fontWeight: 700, color, background: color + "18", padding: "3px 10px", borderRadius: 999, minWidth: 58, textAlign: "center" }}>
+                            {sectionTimings[key]} min
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div style={styles.wizardNav}>
                 <button type="button" style={styles.btnGhost} onClick={() => setSetupStep(1)}>← Retour</button>
                 <button
                   type="button"
-                  style={{ ...styles.btn, marginTop: 0, opacity: !missingSection ? 0.5 : 1 }}
-                  disabled={!missingSection || !articleFile}
-                  onClick={() => setSetupStep(3)}
-                >
-                  Suivant →
-                </button>
-              </div>
-            </div>
-            )}
-
-            {setupStep === 3 && (
-            <div style={styles.card}>
-              <h2 style={styles.cardTitle}>Problème & consignes</h2>
-              <p style={styles.stepHint}>
-                Récapitulatif : section <strong>{missingSection || "—"}</strong>
-                {articleFile ? ` · Fichier : ${articleFile.name}` : ""}
-              </p>
-
-              <label style={{ ...styles.label, marginTop: 0 }}>Problématique / question *</label>
-              <textarea
-                style={styles.textarea}
-                placeholder="Ex. : Comment l'apprentissage par feedback entre pairs améliore-t-il la qualité de la rédaction scientifique ?"
-                value={question}
-                onChange={e => setQuestion(e.target.value)}
-                rows={3}
-              />
-
-              <label style={styles.label}>Instructions</label>
-              <textarea
-                style={styles.textarea}
-                placeholder="Consignes détaillées : longueur attendue, sources à utiliser, critères de forme…"
-                value={instructions}
-                onChange={e => setInstructions(e.target.value)}
-                rows={3}
-              />
-
-              <div style={{ display: "flex", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
-                <button type="button" style={styles.smallBtn} onClick={() => setArticleModalOpen(true)}>📖 Modifier l&apos;article</button>
-                <button type="button" style={styles.smallBtn} onClick={() => setSectionModalOpen(true)}>✍️ Modifier la section à apprendre</button>
-              </div>
-
-              <label style={styles.label}>Exemple de réponse (optionnel)</label>
-              <textarea
-                style={styles.textarea}
-                placeholder="Modèle ou extrait pour guider les étudiants…"
-                value={examples}
-                onChange={e => setExamples(e.target.value)}
-                rows={2}
-              />
-
-              {/* <label style={styles.label}>Vidéo explicative (optionnel)</label>
-              <div style={styles.uploadZone} onClick={() => document.getElementById("vid-input").click()}>
-                {videoPreview ? (
-                  <video src={videoPreview} controls style={styles.videoPreview} />
-                ) : (
-                  <>
-                    <div style={styles.uploadIcon}>🎬</div>
-                    <div style={styles.uploadText}>Cliquer pour ajouter une vidéo</div>
-                    <div style={styles.uploadSub}>MP4, MOV, WebM — max 200MB</div>
-                  </>
-                )}
-              </div>
-              <input id="vid-input" type="file" accept="video/*" style={{ display: "none" }} onChange={handleVideoChange} /> */}
-
-              <div style={styles.wizardNav}>
-                <button type="button" style={styles.btnGhost} onClick={() => setSetupStep(2)}>← Retour</button>
-                <button
-                  type="button"
-                  style={{ ...styles.btn, marginTop: 0, flex: 1, opacity: (!question.trim() || !missingSection || loading) ? 0.5 : 1 }}
+                  style={{ ...styles.btn, marginTop: 0, flex: 1, opacity: (!missingSection || !articleFile || loading) ? 0.5 : 1 }}
+                  disabled={!missingSection || !articleFile || loading}
                   onClick={handleCreateSession}
-                  disabled={!question.trim() || !missingSection || !articleFile || loading}
                 >
-                  {loading ? "Création…" : "Créer la session →"}
+                  {loading ? "Création…" : "🚀 Lancer la session →"}
                 </button>
               </div>
             </div>
@@ -832,8 +821,11 @@ export default function TeacherSession() {
                   </div>
                 ))}
               </div>
-              <div style={styles.controlRow}>
-                <button style={{ ...styles.btnOutline, opacity: phase >= 4 ? 0.4 : 1 }} onClick={advancePhase} disabled={phase >= 4}>Phase suivante →</button>
+              {/* Auto-flow status */}
+              <div style={{ margin: "12px 0 8px", padding: "10px 14px", background: "#f0fdf4", borderRadius: 10, border: "1px solid #bbf7d0", fontSize: 13, color: "#166534", display: "flex", alignItems: "center", gap: 8 }}>
+                <span>🤖</span>
+                <span style={{ fontWeight: 600 }}>Flux automatique actif</span>
+                <span style={{ color: "#64748b", fontSize: 12 }}>— le système avance les phases automatiquement.</span>
               </div>
               {phase === 1 && (
                 <>
@@ -843,6 +835,15 @@ export default function TeacherSession() {
               )}
               {phase !== 1 && <div style={styles.progressLabel}>{liveStatusText}</div>}
               <GroupsPanel groups={groups} />
+              {/* End session */}
+              <div style={{ marginTop: 20, borderTop: "1px solid #fee2e2", paddingTop: 16 }}>
+                <button
+                  style={{ width: "100%", padding: "12px 0", background: phase >= 4 ? "#ef4444" : "#fff", color: phase >= 4 ? "#fff" : "#dc2626", border: "1.5px solid #fca5a5", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}
+                  onClick={handleEndSession}
+                >
+                  🔴 Terminer la session
+                </button>
+              </div>
             </div>
           )}
 
@@ -876,10 +877,6 @@ export default function TeacherSession() {
             <div style={styles.infoRow}><span style={styles.infoKey}>Students</span><span style={styles.infoVal}>{students.length}</span></div>
             <div style={styles.infoRow}><span style={styles.infoKey}>Groups</span><span style={styles.infoVal}>{groups.length}</span></div>
             <div style={styles.infoRow}><span style={styles.infoKey}>Answers</span><span style={styles.infoVal}>{answeredCount}</span></div>
-          </div>
-          <div style={{ ...styles.sideCard, background: "#1e293b", color: "#f1f5f9" }}>
-            <h3 style={{ ...styles.sideTitle, color: "#94a3b8" }}>Question</h3>
-            <p style={{ fontSize: 14, lineHeight: 1.6 }}>{question || "Not set yet"}</p>
           </div>
           <div style={styles.sideCard}>
             <h3 style={styles.sideTitle}>Flow Guide</h3>

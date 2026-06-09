@@ -1,6 +1,132 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import api from "../api";
 
+// ── Article section auto-detection ───────────────────────────
+const SECTION_PATTERNS = {
+  title:        /^(?!abstract|introduction|method|result|discussion|conclusion|résumé|méthode|résultat).{5,150}$/i,
+  abstract:     /^(\d+\.?\s*)?(abstract|résumé|summary)\b/i,
+  introduction: /^(\d+\.?\s*)?(introduction)\b/i,
+  methods:      /^(\d+\.?\s*)?(methods?|méthodologie|matériels?\s*(and|et)\s*methods?|méthodes?|participants?\s*(and|et)|study\s+design)\b/i,
+  results:      /^(\d+\.?\s*)?(results?|résultats?|findings?)\b/i,
+  discussion:   /^(\d+\.?\s*)?(discussion|discussion\s*(and|et)\s*conclusion)\b/i,
+  conclusion:   /^(\d+\.?\s*)?(conclusion|concluding\s*remarks?|perspectives?|study\s+limitations?)\b/i,
+};
+
+const SECTION_PATTERN_LABELS = {
+  title: "Titre", abstract: "Abstract", introduction: "Introduction",
+  methods: "Méthodes", results: "Résultats", discussion: "Discussion", conclusion: "Conclusion",
+};
+
+function splitArticle(text) {
+  const lines = text.split("\n");
+  const sections = {};
+  let currentSection = "title";
+  let buffer = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    let matched = false;
+    // Only test potential section headers: short lines (≤80 chars), not mid-sentence
+    if (trimmed.length >= 3 && trimmed.length <= 80 && !/[,;]/.test(trimmed)) {
+      for (const [section, pattern] of Object.entries(SECTION_PATTERNS)) {
+        if (section !== "title" && pattern.test(trimmed)) {
+          sections[currentSection] = buffer.join("\n").trim();
+          currentSection = section;
+          buffer = [];
+          matched = true;
+          break;
+        }
+      }
+    }
+    if (!matched) buffer.push(line);
+  }
+  sections[currentSection] = buffer.join("\n").trim();
+  return sections;
+}
+
+// ── Clean & structure extracted article text ─────────────────
+function cleanArticleText(raw) {
+  let text = raw;
+
+  // Strip ## section markers from prior structuring runs (prevents doubling on re-click)
+  text = text.replace(/^## (Titre|Abstract|Introduction|Méthodes|Résultats|Discussion|Conclusion)\s*$/gm, "$1");
+
+  // Normalize spaced-out PDF section headers: "A B S T R A C T" → "ABSTRACT"
+  text = text.replace(/^([A-Z] ){2,}[A-Z]\s*$/gm, m => m.replace(/\s/g, ""));
+
+  // Strip journal header noise: "ARTICLE IN PRESS", "ARTICLE INFO", keyword lists above abstract
+  text = text.replace(/^ARTICLE\s+(IN\s+PRESS|INFO)\s*$/gm, "");
+  text = text.replace(/^Keywords?:.*$/gim, "");
+
+  // Fix PDF line-break hyphens: "effec-\ntive" → "effective"
+  text = text.replace(/(\w)-\s*\n\s*([a-zàâéèêëîïôùûü])/g, "$1$2");
+
+  // Remove References / Bibliography section and everything after
+  const REF_RX = /\n[ \t]*(?:references?|bibliograph(?:y|ie?)|works cited|liste des références?|références?\s*bibliographiques?|sources?)\s*[\n:]/i;
+  const refM = REF_RX.exec(text);
+  if (refM) {
+    text = text.slice(0, refM.index);
+  } else {
+    // Numbered reference block: ≥3 consecutive "[1] ..." lines
+    const blockM = /(?:\n\[\d+\][^\n]+){3,}/.exec(text);
+    if (blockM) text = text.slice(0, blockM.index);
+  }
+
+  // Process line by line
+  const lines = text.split("\n");
+  const out = [];
+  let blankCount = 0;
+
+  for (const line of lines) {
+    const t = line.trim();
+
+    // Page numbers: "5", "- 5 -", "Page 5 of 10"
+    if (/^-?\s*\d{1,4}\s*-?$/.test(t)) continue;
+    if (/^page\s*\d+(\s+(of|sur|de|\/)\s*\d+)?$/i.test(t)) continue;
+
+    // DOI / ISSN / ISBN / copyright / email lines
+    if (/^(doi|issn|isbn|copyright|©|e-?mail|tel\.|fax:)/i.test(t)) continue;
+    if (/^https?:\/\/(doi\.org|dx\.doi\.org)/i.test(t)) continue;
+
+    // Numbered footnote lines: "[1] Author, Year..."
+    if (/^\[\d+\]\s+[A-ZÀÂÉÈ]/.test(t)) continue;
+
+    // Blank lines — cap at 2 consecutive
+    if (t === "") {
+      blankCount++;
+      if (blankCount <= 2) out.push("");
+      continue;
+    }
+    blankCount = 0;
+    out.push(line);
+  }
+
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+const SECTION_ORDER_KEYS = ["title","abstract","introduction","methods","results","discussion","conclusion"];
+const SECTION_LABELS_MAP = {
+  title:"Titre", abstract:"Abstract", introduction:"Introduction",
+  methods:"Méthodes", results:"Résultats", discussion:"Discussion", conclusion:"Conclusion",
+};
+
+function reassembleSections(sections) {
+  let out = "";
+  for (const key of SECTION_ORDER_KEYS) {
+    const content = sections[key]?.trim();
+    if (content) {
+      out += `## ${SECTION_LABELS_MAP[key] || key}\n\n${content}\n\n`;
+    }
+  }
+  // Unrecognized sections
+  for (const [key, content] of Object.entries(sections)) {
+    if (!SECTION_ORDER_KEYS.includes(key) && content?.trim()) {
+      out += `## ${key}\n\n${content.trim()}\n\n`;
+    }
+  }
+  return out.trim();
+}
+
 // ── Constants ─────────────────────────────────────────────────
 const SECTION_COLORS = {
   Titre: "#64748b", Abstract: "#8b5cf6", Introduction: "#22c55e",
@@ -107,10 +233,13 @@ export default function ArticleCutterTool({
   const [exportFormat, setExportFormat] = useState("md");
   const [extractLoading, setExtractLoading] = useState(false);
   const [extractDone, setExtractDone] = useState(false); // true after first attempt
+  const [detectedSections, setDetectedSections] = useState({}); // auto-split result
   const [addingSection, setAddingSection] = useState(false);
   const [newSectionName, setNewSectionName] = useState("");
   const [customSections, setCustomSections] = useState([]);
   const [storedFile, setStoredFile] = useState(null); // keep File object for OCR re-send
+  const [viewMode, setViewMode] = useState("raw"); // "raw" | "structured"
+  const [structuredSections, setStructuredSections] = useState({}); // after clean+structure
 
   const taRef   = useRef(null);
   const fileRef = useRef(null);
@@ -118,6 +247,17 @@ export default function ArticleCutterTool({
 
   const effectiveSections = [...allSectionNames, ...customSections];
   const currentStarters = sectionGuidance?.[missingSection] ?? DEFAULT_STARTERS[missingSection] ?? [];
+
+  // Auto-detect sections whenever text changes and is substantial
+  useEffect(() => {
+    if (text.length < 100) { setDetectedSections({}); return; }
+    const split = splitArticle(text);
+    // Keep only non-empty sections
+    const nonEmpty = Object.fromEntries(
+      Object.entries(split).filter(([, v]) => v.trim().length > 20)
+    );
+    setDetectedSections(nonEmpty);
+  }, [text]);
 
   // ── File processing ───────────────────────────────────────
   const processFile = useCallback(async (file) => {
@@ -276,6 +416,24 @@ export default function ArticleCutterTool({
     await navigator.clipboard.writeText(finalText);
   };
 
+  // ── Clean + structure ─────────────────────────────────────
+  const handleStructure = () => {
+    if (!text.trim()) return;
+    const cleaned = cleanArticleText(text);
+    const sections = splitArticle(cleaned);
+    const nonEmpty = Object.fromEntries(
+      Object.entries(sections).filter(([, v]) => v?.trim().length > 10)
+    );
+    setStructuredSections(nonEmpty);
+    const reassembled = reassembleSections(nonEmpty);
+    setText(reassembled);
+    setViewMode("structured");
+    setCutRange(null);
+    setValidated(false);
+    setFinalText("");
+    if (status !== "loaded") setStatus("loaded");
+  };
+
   // ── Starters helpers ──────────────────────────────────────
   const updateStarter = (idx, val) => {
     const arr = [...currentStarters]; arr[idx] = val;
@@ -359,6 +517,44 @@ export default function ArticleCutterTool({
             )}
           </div>
         </div>
+
+        {/* Auto-detected sections panel */}
+        {Object.keys(detectedSections).length > 0 && (
+          <div style={{ ...s.sideBlock, background: "#f0fdf4", borderLeft: "3px solid #22c55e" }}>
+            <div style={{ ...s.sideLabel, color: "#15803d" }}>✅ Sections détectées</div>
+            <p style={{ fontSize: 11, color: "#166534", margin: "0 0 10px", lineHeight: 1.4 }}>
+              Cliquez sur une section pour la sélectionner comme section à cacher.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {Object.entries(detectedSections).map(([key, content]) => {
+                const label = SECTION_PATTERN_LABELS[key] || key;
+                const isSel = missingSection === label;
+                const previewLen = Math.min(content.length, 60);
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => onMissingChange?.(label)}
+                    style={{
+                      textAlign: "left", padding: "7px 10px", borderRadius: 8, cursor: "pointer",
+                      border: isSel ? "2px solid #16a34a" : "1.5px solid #d1fae5",
+                      background: isSel ? "#dcfce7" : "#fff",
+                      color: isSel ? "#15803d" : "#374151",
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: 12 }}>{label}</div>
+                    <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                      {content.slice(0, previewLen)}{content.length > previewLen ? "…" : ""}
+                    </div>
+                    <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>
+                      {content.split(/\s+/).length} mots
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Formats */}
         <div style={s.sideBlock}>
@@ -498,7 +694,7 @@ export default function ArticleCutterTool({
           </div>
         )}
 
-        {/* Tabs + file chip */}
+        {/* Tabs + file chip + view toggle */}
         <div style={s.tabsRow}>
           {[{ id: "paste", icon: "📋", label: "Coller" }, { id: "file", icon: "📁", label: "Importer un fichier" }].map(m => (
             <button key={m.id} type="button" onClick={() => { setInputMode(m.id); if (m.id === "file") fileRef.current?.click(); }} style={{
@@ -519,40 +715,120 @@ export default function ArticleCutterTool({
               <span style={{ fontSize: 11, color: "#94a3b8" }}>· {formatSize(fileInfo.size)}</span>
             </div>
           )}
+          {/* View toggle — only when text exists */}
+          {text.trim().length > 50 && (
+            <div style={{ marginLeft: "auto", display: "flex", border: "1.5px solid #e2e8f0", borderRadius: 8, overflow: "hidden" }}>
+              {[{ id: "raw", label: "📄 Brut" }, { id: "structured", label: "🗂️ Structuré" }].map(v => (
+                <button key={v.id} type="button" onClick={() => setViewMode(v.id)} style={{
+                  padding: "6px 13px", border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                  background: viewMode === v.id ? "#6366f1" : "#f8fafc",
+                  color: viewMode === v.id ? "#fff" : "#64748b",
+                }}>
+                  {v.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Textarea / preview */}
-        {!cutRange ? (
-          <div style={{ position: "relative" }}>
-            <textarea
-              ref={taRef}
-              style={s.textarea}
-              value={text}
-              onChange={e => { setText(e.target.value); if (status !== "loaded") setStatus(e.target.value ? "loaded" : "ready"); }}
-              placeholder={`Collez ici l'article complet (avec toutes les sections)…`}
-              disabled={extractLoading}
-            />
-            <div style={s.taFooter}>
-              <span style={{ fontSize: 11, color: "#94a3b8" }}>{text.length.toLocaleString("fr")} caractères</span>
-              <span style={{ fontSize: 11, color: "#94a3b8" }}>Sélectionnez du texte → Retirer la sélection</span>
+        {/* ── Structured view ── */}
+        {viewMode === "structured" && !cutRange && Object.keys(structuredSections).length > 0 ? (
+          <div style={{ margin: "0 24px", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden", background: "#fff" }}>
+            {/* Header bar */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>
+                {Object.keys(structuredSections).length} section{Object.keys(structuredSections).length > 1 ? "s" : ""} détectée{Object.keys(structuredSections).length > 1 ? "s" : ""} · Références, notes et numéros de page supprimés
+              </span>
+              <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 600 }}>✓ Texte structuré</span>
             </div>
-            {/* Scanned PDF banner inline */}
-            {extractDone && status === "ocr" && !extractLoading && (
-              <div style={s.inlineBanner}>⚠️ PDF scanné détecté — activez l'OCR ci-dessus pour lire le texte</div>
-            )}
+            {/* Section cards */}
+            <div style={{ maxHeight: 400, overflowY: "auto" }}>
+              {SECTION_ORDER_KEYS.filter(k => structuredSections[k]?.trim()).map(key => {
+                const label = SECTION_LABELS_MAP[key] || key;
+                const color = SECTION_COLORS[label] || "#6366f1";
+                const content = structuredSections[key].trim();
+                const words = content.split(/\s+/).filter(Boolean).length;
+                const isMissing = missingSection === label;
+                return (
+                  <div key={key} style={{ borderBottom: "1px solid #f1f5f9", padding: "14px 16px", background: isMissing ? `${color}08` : "#fff", cursor: "pointer", transition: "background .15s" }}
+                    onClick={() => { onMissingChange?.(label); }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                      <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                      <span style={{ fontSize: 13, fontWeight: 800, color: isMissing ? color : "#1e293b" }}>{label}</span>
+                      <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: 4 }}>{words} mots</span>
+                      {isMissing && (
+                        <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: "#fff", background: color, padding: "2px 8px", borderRadius: 999 }}>
+                          ✂️ À découper
+                        </span>
+                      )}
+                    </div>
+                    <p style={{ margin: 0, fontSize: 12, color: "#374151", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                      {content}
+                    </p>
+                  </div>
+                );
+              })}
+              {/* Unknown sections */}
+              {Object.entries(structuredSections).filter(([k]) => !SECTION_ORDER_KEYS.includes(k)).map(([key, content]) => {
+                const words = content.trim().split(/\s+/).filter(Boolean).length;
+                return (
+                  <div key={key} style={{ borderBottom: "1px solid #f1f5f9", padding: "14px 16px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 800, color: "#64748b" }}>{key}</span>
+                      <span style={{ fontSize: 11, color: "#94a3b8" }}>{words} mots</span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: 12, color: "#374151", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                      {content.trim()}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ padding: "8px 14px", background: "#f8fafc", borderTop: "1px solid #e2e8f0", fontSize: 11, color: "#94a3b8" }}>
+              Cliquez sur une section pour la sélectionner comme section à découper · {text.length.toLocaleString("fr")} caractères
+            </div>
           </div>
         ) : (
-          <div style={{ position: "relative" }}>
-            {renderTextWithCut()}
-            <div style={s.taFooter}>
-              <span style={{ fontSize: 11, color: "#94a3b8" }}>{(text.length - (cutRange.end - cutRange.start)).toLocaleString("fr")} caractères après découpe</span>
-              <button type="button" onClick={resetCut} style={{ fontSize: 11, color: "#6366f1", fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}>↺ Réinitialiser</button>
+          /* ── Raw / cut preview ── */
+          !cutRange ? (
+            <div style={{ position: "relative" }}>
+              <textarea
+                ref={taRef}
+                style={s.textarea}
+                value={text}
+                onChange={e => { setText(e.target.value); setViewMode("raw"); if (status !== "loaded") setStatus(e.target.value ? "loaded" : "ready"); }}
+                placeholder={`Collez ici l'article complet (avec toutes les sections)…`}
+                disabled={extractLoading}
+              />
+              <div style={s.taFooter}>
+                <span style={{ fontSize: 11, color: "#94a3b8" }}>{text.length.toLocaleString("fr")} caractères</span>
+                <span style={{ fontSize: 11, color: "#94a3b8" }}>Sélectionnez du texte → Retirer la sélection</span>
+              </div>
+              {extractDone && status === "ocr" && !extractLoading && (
+                <div style={s.inlineBanner}>⚠️ PDF scanné détecté — activez l'OCR ci-dessus pour lire le texte</div>
+              )}
             </div>
-          </div>
+          ) : (
+            <div style={{ position: "relative" }}>
+              {renderTextWithCut()}
+              <div style={s.taFooter}>
+                <span style={{ fontSize: 11, color: "#94a3b8" }}>{(text.length - (cutRange.end - cutRange.start)).toLocaleString("fr")} caractères après découpe</span>
+                <button type="button" onClick={resetCut} style={{ fontSize: 11, color: "#6366f1", fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}>↺ Réinitialiser</button>
+              </div>
+            </div>
+          )
         )}
 
         {/* Action bar */}
         <div style={s.actionBar}>
+          <button
+            type="button"
+            style={{ padding: "10px 16px", background: "#f0fdf4", color: "#16a34a", border: "1.5px solid #bbf7d0", borderRadius: 9, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit", opacity: !text.trim() ? 0.4 : 1 }}
+            disabled={!text.trim()}
+            onClick={handleStructure}
+          >
+            🗂️ Nettoyer &amp; Structurer
+          </button>
           <button
             type="button"
             style={{ ...s.btnCut, opacity: (!text.trim() || cutRange) ? 0.4 : 1 }}

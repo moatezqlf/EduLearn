@@ -6,6 +6,9 @@ import { Session, SessionSubmission } from "./Session.model.js";
 import jwt from "jsonwebtoken";
 import { buildLearnLensEvalPrompt } from "./prompts/sessionWritingEval.js";
 
+// Per-session auto-advance timers (sessionId -> timeoutHandle)
+const phaseTimers = new Map();
+
 let _client = null;
 function getClient() {
   if (!_client) _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -316,6 +319,8 @@ function registerSessionEvents(io) {
             currentSectionKey: session.currentSectionKey || session.selectedSections?.[0] || "",
             currentRound: session.currentRound || 1,
             phase: session.phase,
+            sectionTimings: session.sectionTimings || {},
+            phaseEndsAt: session.phaseEndsAt ? session.phaseEndsAt.toISOString() : null,
             ...sessionClientMeta(session),
           });
           if (session.phase && session.phase !== "waiting") {
@@ -324,6 +329,8 @@ function registerSessionEvents(io) {
               currentSectionKey: session.currentSectionKey || session.selectedSections?.[0] || "",
               currentRound: session.currentRound || 1,
               selectedSections: session.selectedSections || [],
+              sectionTimings: session.sectionTimings || {},
+              phaseEndsAt: session.phaseEndsAt ? session.phaseEndsAt.toISOString() : null,
               ...sessionClientMeta(session),
             });
           }
@@ -412,13 +419,62 @@ function registerSessionEvents(io) {
       const room = `session:${sid}`;
       console.log(`advance_phase: room=${room}, phase=${phase}`);
 
-      await Session.findByIdAndUpdate(sid, { phase });
+      // Clear any existing auto-advance timer for this session
+      if (phaseTimers.has(sid)) {
+        clearTimeout(phaseTimers.get(sid));
+        phaseTimers.delete(sid);
+      }
+
+      // Compute timer window for writing or review phase
+      let phaseStartedAt = null;
+      let phaseEndsAt = null;
+      if (phase === "writing" || phase === "review") {
+        const sessionBefore = await Session.findById(sid);
+        const sectionKey = sessionBefore?.currentSectionKey || sessionBefore?.selectedSections?.[0] || "";
+        const timings = sessionBefore?.sectionTimings || {};
+        const timingKey = phase === "review" ? `${sectionKey}_review` : sectionKey;
+        const minutes = Number(timings[timingKey] || 0);
+        if (minutes > 0) {
+          phaseStartedAt = new Date();
+          phaseEndsAt = new Date(Date.now() + minutes * 60 * 1000);
+          const nextPhase = phase === "writing" ? "review" : "ai";
+          const handle = setTimeout(async () => {
+            phaseTimers.delete(sid);
+            const stillIn = await Session.findById(sid);
+            if (stillIn?.phase !== phase) return;
+            await Session.findByIdAndUpdate(sid, { phase: nextPhase, phaseStartedAt: null, phaseEndsAt: null });
+            const afterNext = await Session.findById(sid);
+            const nextPayload = {
+              phase: nextPhase,
+              currentSectionKey: afterNext?.currentSectionKey || "",
+              currentRound: afterNext?.currentRound || 1,
+              selectedSections: afterNext?.selectedSections || [],
+              phaseEndsAt: null,
+              sectionTimings: afterNext?.sectionTimings || {},
+              ...sessionClientMeta(afterNext),
+            };
+            io.to(room).emit("phase_changed", nextPayload);
+            if (phase === "writing") {
+              await assignGroups(io, sid);
+              await assignReviewAssignments(io, sid);
+            }
+          }, minutes * 60 * 1000);
+          phaseTimers.set(sid, handle);
+        }
+      }
+
+      await Session.findByIdAndUpdate(sid, {
+        phase,
+        ...(phaseStartedAt ? { phaseStartedAt, phaseEndsAt } : { phaseStartedAt: null, phaseEndsAt: null }),
+      });
       const sessionAfter = await Session.findById(sid);
       const payload = {
         phase,
         currentSectionKey: sessionAfter?.currentSectionKey || sessionAfter?.selectedSections?.[0] || "",
         currentRound: sessionAfter?.currentRound || 1,
         selectedSections: sessionAfter?.selectedSections || [],
+        phaseEndsAt: phaseEndsAt ? phaseEndsAt.toISOString() : null,
+        sectionTimings: sessionAfter?.sectionTimings || {},
         ...sessionClientMeta(sessionAfter),
       };
       io.to(room).emit("phase_changed", payload);
@@ -527,6 +583,29 @@ function registerSessionEvents(io) {
           answers: allAnswers,
         });
         console.log(`Answer submitted by ${studentName}, count: ${count}/${session?.students?.length}`);
+
+        // Auto-advance writing → review when all connected students submitted
+        const totalStudents = session?.students?.length || 0;
+        if (totalStudents >= 2 && count >= totalStudents) {
+          const stillWriting = await Session.findById(sid);
+          if (stillWriting?.phase === "writing") {
+            console.log(`All ${totalStudents} students submitted — auto-advancing to review`);
+            if (phaseTimers.has(sid)) { clearTimeout(phaseTimers.get(sid)); phaseTimers.delete(sid); }
+            await Session.findByIdAndUpdate(sid, { phase: "review", phaseStartedAt: null, phaseEndsAt: null });
+            const afterReview = await Session.findById(sid);
+            io.to(`session:${sid}`).emit("phase_changed", {
+              phase: "review",
+              currentSectionKey: afterReview?.currentSectionKey || "",
+              currentRound: afterReview?.currentRound || 1,
+              selectedSections: afterReview?.selectedSections || [],
+              phaseEndsAt: null,
+              sectionTimings: afterReview?.sectionTimings || {},
+              ...sessionClientMeta(afterReview),
+            });
+            await assignGroups(io, sid);
+            await assignReviewAssignments(io, sid);
+          }
+        }
       } catch (err) {
         console.error("submit_answer error:", err.message);
       }
@@ -568,8 +647,55 @@ function registerSessionEvents(io) {
         }
 
         io.to(`session:${sid}`).emit("review_submitted", { studentName, revieweeStudentId: targetId, sectionKey: sk });
+
+        // Auto-advance review → ai when every submitter has received at least 1 peer review
+        const stillReview = await Session.findById(sid);
+        if (stillReview?.phase === "review") {
+          const subs = await SessionSubmission.find({ sessionId: sid, round });
+          const totalSubs = subs.length;
+          const reviewedCount = subs.filter(s => s.peerReviews?.length > 0).length;
+          if (totalSubs >= 2 && reviewedCount >= totalSubs) {
+            console.log(`All ${totalSubs} submissions reviewed — auto-advancing to AI evaluation`);
+            if (phaseTimers.has(sid)) { clearTimeout(phaseTimers.get(sid)); phaseTimers.delete(sid); }
+            await Session.findByIdAndUpdate(sid, { phase: "ai", phaseStartedAt: null, phaseEndsAt: null });
+            const afterAi = await Session.findById(sid);
+            io.to(`session:${sid}`).emit("phase_changed", {
+              phase: "ai",
+              currentSectionKey: afterAi?.currentSectionKey || "",
+              currentRound: afterAi?.currentRound || 1,
+              selectedSections: afterAi?.selectedSections || [],
+              phaseEndsAt: null,
+              sectionTimings: afterAi?.sectionTimings || {},
+              ...sessionClientMeta(afterAi),
+            });
+            await runSectionAiEvaluation(io, sid);
+          }
+        }
       } catch (err) {
         console.error("submit_review error:", err.message);
+      }
+    });
+
+    // ── End session (teacher) ────────────────────────────────────────────────
+    socket.on("end_session", async ({ sessionId }) => {
+      const sid = String(sessionId);
+      try {
+        if (phaseTimers.has(sid)) { clearTimeout(phaseTimers.get(sid)); phaseTimers.delete(sid); }
+        await Session.findByIdAndUpdate(sid, { phase: "results", phaseStartedAt: null, phaseEndsAt: null });
+        const session = await Session.findById(sid);
+        io.to(`session:${sid}`).emit("phase_changed", {
+          phase: "results",
+          currentSectionKey: session?.currentSectionKey || "",
+          currentRound: session?.currentRound || 1,
+          selectedSections: session?.selectedSections || [],
+          phaseEndsAt: null,
+          sectionTimings: session?.sectionTimings || {},
+          ...sessionClientMeta(session),
+        });
+        await emitSectionResults(io, sid);
+        console.log(`Session ${sid} ended by teacher`);
+      } catch (err) {
+        console.error("end_session error:", err.message);
       }
     });
 
@@ -653,69 +779,181 @@ function registerSessionEvents(io) {
   });
 }
 
-// ── Inline prompt builder (no external import needed) ────────────────────────
+// ── Per-section AI evaluators ────────────────────────────────────────────────
+const SECTION_EVALUATORS = {
+  "Titre": {
+    wordMin: 8, wordMax: 20, shortThreshold: 3, shortCap: 3,
+    shortMsg: "Un titre doit comporter 8-20 mots. Score plafonné à 3/20.",
+    guidance: "Un titre scientifique doit être : concis (8-20 mots), informatif (reflète l'objectif, la population et l'approche), contenir les mots-clés de recherche indexables, éviter les abréviations et formulations vagues.",
+    criteria: {
+      concision:   { label: "Concision",   rubric: "0=trop court ou beaucoup trop long · 3=longueur acceptable · 5=8-20 mots, dense et informatif" },
+      precision:   { label: "Précision",   rubric: "0=vague, domaine non identifiable · 3=domaine reconnaissable · 5=objectif + population + approche identifiables" },
+      keywords:    { label: "Mots-clés",   rubric: "0=aucun terme disciplinaire · 3=quelques termes génériques · 5=mots-clés précis, spécifiques et indexables" },
+      formulation: { label: "Formulation", rubric: "0=grammaticalement incorrect · 3=correct mais peu naturel · 5=formulation académique soignée et naturelle" },
+    },
+    rewriteNote: "\"rewrite\" = meilleur titre reformulé (une seule phrase, 8-20 mots, niveau académique). \"suggestions\" = 3 TITRES ALTERNATIFS COMPLETS ET DIFFÉRENTS (pas de commentaires, des titres complets).",
+  },
+  "Abstract": {
+    wordMin: 100, wordMax: 300, shortThreshold: 70, shortCap: 8,
+    shortMsg: "Un abstract doit contenir 100-300 mots. Score plafonné à 8/20.",
+    guidance: "L'abstract (100-300 mots) suit la structure IMRAD en miniature : contexte/problème → objectif → méthode résumée → résultats principaux (chiffrés si possible) → conclusion/implication. Doit être autonome (compréhensible sans lire l'article).",
+    criteria: {
+      context:            { label: "Contexte/Problème",    rubric: "0=absent · 3=mentionné · 5=problème clairement posé avec justification" },
+      objective:          { label: "Objectif",              rubric: "0=absent · 3=vague · 5=précis, mesurable, lié au problème" },
+      method:             { label: "Méthode",               rubric: "0=absente · 3=mentionnée · 5=approche, population et instruments décrits" },
+      results_conclusion: { label: "Résultats/Conclusion",  rubric: "0=absents · 3=partiels · 5=résultats chiffrés + implication ou portée claire" },
+    },
+    rewriteNote: "\"rewrite\" = abstract remanié suivant : contexte → objectif → méthode → résultats → conclusion. Minimum 120 mots. \"suggestions\" = conseils de reformulation de phrases spécifiques.",
+  },
+  "Introduction": {
+    wordMin: 150, wordMax: 600, shortThreshold: 80, shortCap: 8,
+    shortMsg: "Une introduction doit contenir 150-600 mots. Score plafonné à 8/20.",
+    guidance: "L'introduction établit : contexte général → problème spécifique → état de l'art → lacune identifiée → objectif de l'étude → annonce du plan. Doit citer des travaux antérieurs.",
+    criteria: {
+      funnel:     { label: "Entonnoir",            rubric: "0=pas de progression logique · 3=transition partielle · 5=général→spécifique→objectif bien articulé" },
+      literature: { label: "Revue de littérature", rubric: "0=aucune référence · 3=quelques citations · 5=synthèse critique de travaux pertinents" },
+      gap:        { label: "Lacune identifiée",    rubric: "0=absente · 3=suggérée · 5=explicitement formulée et justifiée" },
+      objective:  { label: "Objectif de l'étude",  rubric: "0=absent · 3=vague · 5=précis avec hypothèse ou question de recherche" },
+    },
+    rewriteNote: "\"rewrite\" = introduction remaniée suivant : contexte → état de l'art → lacune → objectif. Minimum 150 mots. \"suggestions\" = conseils de reformulation de passages spécifiques.",
+  },
+  "Méthodes": {
+    wordMin: 100, wordMax: 600, shortThreshold: 80, shortCap: 8,
+    shortMsg: "La section Méthodes doit contenir 100-600 mots. Score plafonné à 8/20.",
+    guidance: "La section Méthodes détaille : participants (taille, critères inclusion/exclusion, recrutement), matériel & instruments de mesure validés, procédure reproductible étape par étape, analyse statistique (tests + seuils).",
+    criteria: {
+      sample:      { label: "Participants/Échantillon", rubric: "0=non décrit · 3=partiellement décrit · 5=taille, critères, recrutement détaillés" },
+      instruments: { label: "Matériel & Mesures",       rubric: "0=non mentionnés · 3=nommés · 5=outils validés, variables opérationnalisées" },
+      procedure:   { label: "Procédure",                rubric: "0=absente · 3=étapes partielles · 5=protocole reproductible pas à pas" },
+      analysis:    { label: "Analyse statistique",      rubric: "0=non mentionnée · 3=tests nommés · 5=justification des choix + seuil de signification" },
+    },
+    rewriteNote: "\"rewrite\" = section remaniée couvrant : participants → instruments → procédure → analyse. Minimum 120 mots, reproductibilité prioritaire. \"suggestions\" = conseils de reformulation précis.",
+  },
+  "Résultats": {
+    wordMin: 80, wordMax: 400, shortThreshold: 60, shortCap: 8,
+    shortMsg: "La section Résultats doit contenir 80-400 mots. Score plafonné à 8/20.",
+    guidance: "La section Résultats présente les données factuellement : chiffres précis avec intervalles de confiance/p-values, ordre suivant les objectifs/hypothèses, sans aucune interprétation.",
+    criteria: {
+      data:         { label: "Présentation des données",  rubric: "0=données absentes · 3=données floues · 5=chiffrées, précises, complètes" },
+      order:        { label: "Ordre logique",              rubric: "0=désorganisé · 3=ordre partiel · 5=suit l'ordre des objectifs/hypothèses" },
+      objectivity:  { label: "Objectivité",                rubric: "0=interprétation mélangée aux données · 3=quelques interprétations · 5=pure description factuelle" },
+      significance: { label: "Signification statistique", rubric: "0=statistiques absentes · 3=indicateurs partiels · 5=p-values, IC, tailles d'effet présents" },
+    },
+    rewriteNote: "\"rewrite\" = résultats remaniés, factuels et ordonnés, avec chiffres. Aucune interprétation. Minimum 80 mots. \"suggestions\" = conseils de reformulation.",
+  },
+  "Discussion": {
+    wordMin: 150, wordMax: 700, shortThreshold: 100, shortCap: 8,
+    shortMsg: "La Discussion doit contenir 150-700 mots. Score plafonné à 8/20.",
+    guidance: "La Discussion interprète les résultats : explication de chaque résultat clé, comparaison à la littérature, limites méthodologiques, implications théoriques et pratiques, retour à la problématique.",
+    criteria: {
+      interpretation: { label: "Interprétation",           rubric: "0=résultats non interprétés · 3=interprétation partielle · 5=chaque résultat clé expliqué et contextualisé" },
+      comparison:     { label: "Comparaison littérature",  rubric: "0=aucune mise en perspective · 3=quelques comparaisons · 5=comparaisons systématiques avec citations" },
+      limitations:    { label: "Limites de l'étude",      rubric: "0=absentes · 3=une limite mentionnée · 5=limites multiples, nuancées, discutées" },
+      implications:   { label: "Implications",             rubric: "0=absentes · 3=vagues · 5=implications théoriques ET pratiques clairement formulées" },
+    },
+    rewriteNote: "\"rewrite\" = discussion remaniée suivant : interprétation → comparaison littérature → limites → implications. Minimum 180 mots. \"suggestions\" = reformulations de passages clés.",
+  },
+  "Conclusion": {
+    wordMin: 60, wordMax: 250, shortThreshold: 40, shortCap: 8,
+    shortMsg: "La Conclusion doit contenir 60-250 mots. Score plafonné à 8/20.",
+    guidance: "La Conclusion synthétise : rappel de l'objectif, apports principaux, portée pratique/théorique, ouverture (travaux futurs). Concise, pas de nouveaux résultats.",
+    criteria: {
+      synthesis:    { label: "Synthèse",             rubric: "0=aucun résumé · 3=résumé partiel · 5=synthèse complète et concise des apports" },
+      answer:       { label: "Réponse à l'objectif", rubric: "0=objectif non repris · 3=partiellement répondu · 5=réponse directe et explicite" },
+      perspectives: { label: "Perspectives",         rubric: "0=absentes · 3=une piste mentionnée · 5=pistes spécifiques et réalistes" },
+      concision:    { label: "Concision",            rubric: "0=redondant ou trop long · 3=acceptable · 5=dense, chaque phrase apporte de l'information" },
+    },
+    rewriteNote: "\"rewrite\" = conclusion remaniée : synthèse → réponse à l'objectif → perspectives. 70-200 mots. \"suggestions\" = reformulations de phrases spécifiques.",
+  },
+};
+
+// ── Inline prompt builder ─────────────────────────────────────────────────────
 function buildInlineFeedbackPrompt({ question, instructions, examples, answer, docType, level, language, selectedSections, evaluationCriteria }) {
-  const criteriaText = Object.entries(evaluationCriteria || {})
+  const detectedSection = (selectedSections || []).find(s => SECTION_EVALUATORS[s]) || "";
+  const ev = SECTION_EVALUATORS[detectedSection];
+
+  const words = answer.trim().split(/\s+/).filter(Boolean).length;
+  const tooShort = ev ? words < ev.shortThreshold : words < 30;
+  const partial  = !tooShort && ev ? words < ev.wordMin : (!tooShort && words < 70);
+  const shortCap = ev?.shortCap ?? 3;
+
+  const teacherCriteriaText = Object.entries(evaluationCriteria || {})
     .map(([sec, crit]) => `  ${sec}:\n${(crit || []).map(c => `    - ${c}`).join("\n")}`)
     .join("\n");
 
-  const words = answer.trim().split(/\s+/).filter(Boolean).length;
-  const tooShort = words < 30;
-  const partial  = words >= 30 && words < 70;
+  // Section-specific rubric lines and JSON schema for criteriaScores
+  let rubricLines, criteriaSchemaLines;
+  if (ev) {
+    rubricLines = Object.entries(ev.criteria)
+      .map(([, { label, rubric }]) => `  ${label} (0-5) : ${rubric}`)
+      .join("\n");
+    criteriaSchemaLines = Object.entries(ev.criteria)
+      .map(([key, { label }]) => `    "${key}": { "score": <0-5>, "label": "${label}", "comment": "<explication SPÉCIFIQUE avec citation exacte de la réponse>" }`)
+      .join(",\n");
+  } else {
+    rubricLines = `  Clarté (0-5) :        0=incompréhensible · 3=acceptable · 5=vocabulaire précis et phrases claires
+  Structure (0-5) :     0=aucun plan · 3=plan partiel · 5=bien articulé
+  Argumentation (0-5) : 0=affirmations sans preuves · 3=quelques arguments · 5=arguments étayés
+  Précision sci. (0-5) :0=erreurs factuelles · 3=correct · 5=terminologie et contenu experts`;
+    criteriaSchemaLines = `    "clarity":       { "score": <0-5>, "label": "Clarté",               "comment": "<citation>" },
+    "structure":     { "score": <0-5>, "label": "Structure",             "comment": "<citation>" },
+    "argumentation": { "score": <0-5>, "label": "Argumentation",         "comment": "<citation>" },
+    "scientific":    { "score": <0-5>, "label": "Précision scientifique","comment": "<citation>" }`;
+  }
+
+  const suggestionsSchema = detectedSection === "Titre"
+    ? `  "suggestions": ["<titre alternatif complet 1, 8-20 mots>", "<titre alternatif complet 2>", "<titre alternatif complet 3>"],`
+    : `  "suggestions": ["<suggestion de reformulation précise d'un passage>", "<autre suggestion>"],`;
+
+  const rewriteSchema = detectedSection === "Titre"
+    ? `  "rewrite": "<meilleur titre reformulé — 8-20 mots, niveau académique>",`
+    : `  "rewrite": "<version améliorée COMPLÈTE — ${ev ? `minimum ${ev.wordMin} mots, ` : "minimum 80 mots, "}style académique formel, intègre tous les critères manquants>",`;
 
   return `Tu es un correcteur expert en rédaction scientifique académique (niveau ${level || "Master / PFE"}).
-Ta mission : évaluer rigoureusement la réponse d'un étudiant sur une section de ${docType === "memoire" ? "mémoire PFE" : "article scientifique"} (langue : ${language || "FR"}).
+Ta mission : évaluer rigoureusement la réponse d'un étudiant sur ${detectedSection ? `la section « ${detectedSection} »` : "une section"} de ${docType === "memoire" ? "mémoire PFE" : "article scientifique"} (langue : ${language || "FR"}).
 
 ═══ CONTEXTE DE L'EXERCICE ═══
 Problématique : "${question}"
 ${instructions ? `Instructions spécifiques : "${instructions}"` : ""}
 ${examples ? `Exemple de réponse attendue :\n"${examples}"` : ""}
-${criteriaText ? `\nCRITÈRES D'ÉVALUATION PAR SECTION :\n${criteriaText}` : ""}
+${ev ? `\nATTENDUS POUR LA SECTION « ${detectedSection} » :\n${ev.guidance}` : ""}
+${teacherCriteriaText ? `\nCRITÈRES DÉFINIS PAR L'ENSEIGNANT :\n${teacherCriteriaText}` : ""}
 
 ═══ RÉPONSE DE L'ÉTUDIANT (${words} mots) ═══
 "${answer}"
 
-═══ RÈGLES D'ÉVALUATION STRICTES ═══
-${tooShort ? `🔴 RÉPONSE TRÈS COURTE (${words} mots < 30 mots minimum) :
-  - Score plafonné à 3/20 — réponse insuffisante, ne représente pas une rédaction académique.
-  - Explique clairement pourquoi la longueur est insuffisante pour cette section.` : ""}
-${partial ? `🟡 RÉPONSE INCOMPLÈTE (${words} mots) :
-  - Score plafonné à 10/20 — réponse partielle, manque de développement.
-  - Une section académique de qualité nécessite 80–250 mots selon le type.` : ""}
+═══ RÈGLES D'ÉVALUATION ═══
+${tooShort ? `🔴 RÉPONSE TRÈS COURTE (${words} mots — minimum attendu : ${ev?.shortThreshold ?? 30} mots) :
+  → Score plafonné à ${shortCap}/20. Explique précisément pourquoi la longueur est insuffisante.` : ""}
+${partial ? `🟡 RÉPONSE INCOMPLÈTE (${words} mots — attendu : ${ev?.wordMin ?? 80}–${ev?.wordMax ?? 250} mots) :
+  → Score plafonné à 10/20. Signale le manque de développement.` : ""}
 
-1. Le score /20 = somme des 4 critères (chacun /5). NE PAS arrondir arbitrairement.
-2. CITER des passages EXACTS de la réponse pour justifier chaque critique.
-3. Les weaknesses et feedForward doivent être ACTIONNABLES et SPÉCIFIQUES à cette réponse.
-4. La réécriture ("rewrite") doit être substantielle : minimum 80 mots, style académique formel.
-5. Si la réponse est hors-sujet ou ne répond pas à la problématique, signale-le explicitement.
-6. NE PAS inventer du contenu absent de la réponse — évalue uniquement ce qui est écrit.
+1. Score /20 = somme des 4 critères ci-dessous (chacun /5). NE PAS arrondir arbitrairement.
+2. CITER des passages EXACTS de la réponse dans chaque "comment", "strengths", "weaknesses".
+3. "feedForward" = 3 conseils ACTIONNABLES ET SPÉCIFIQUES à cette réponse (pas de généralités).
+4. ${ev?.rewriteNote ?? "\"rewrite\" doit être substantielle : minimum 80 mots, style académique formel."}
+5. NE PAS inventer de contenu absent — évalue uniquement ce qui est écrit.
 
-BARÈME DÉTAILLÉ (chaque critère noté /5) :
-  Clarté (0-5) :       0=incompréhensible · 3=acceptable · 5=excellent, vocabulaire précis et phrases claires
-  Structure (0-5) :    0=aucun plan · 3=plan partiel · 5=intro/développement/conclusion bien articulés
-  Argumentation (0-5): 0=affirmations sans preuves · 3=quelques arguments · 5=arguments étayés et cohérents
-  Précision sci. (0-5):0=erreurs factuelles · 3=correct mais superficiel · 5=terminologie et contenu experts
+BARÈME (chaque critère /5) :
+${rubricLines}
 
 Réponds UNIQUEMENT avec du JSON valide (sans balises markdown, sans texte avant/après) :
 {
   "score": <entier 0-20, somme des 4 critères>,
   "level": "<Excellent (18-20) | Très bien (15-17) | Bien (12-14) | Satisfaisant (10-11) | Insuffisant (6-9) | Faible (0-5)>",
-  "basic": "<3-4 phrases : évaluation globale SPÉCIFIQUE avec citations de la réponse>",
+  "basic": "<3-4 phrases d'évaluation globale SPÉCIFIQUE avec citations de la réponse>",
   "criteriaScores": {
-    "clarity":       { "score": <0-5>, "comment": "<explication avec exemple précis tiré de la réponse>" },
-    "structure":     { "score": <0-5>, "comment": "<explication avec exemple précis tiré de la réponse>" },
-    "argumentation": { "score": <0-5>, "comment": "<explication avec exemple précis tiré de la réponse>" },
-    "scientific":    { "score": <0-5>, "comment": "<explication avec exemple précis tiré de la réponse>" }
+${criteriaSchemaLines}
   },
   "strengths":   ["<point fort 1 avec citation exacte>", "<point fort 2>"],
   "weaknesses":  ["<faiblesse 1 avec citation exacte>", "<faiblesse 2>"],
   "feedForward": ["<conseil actionnable 1>", "<conseil actionnable 2>", "<conseil actionnable 3>"],
-  "suggestions": ["<suggestion de reformulation précise>", "<autre suggestion>"],
+${suggestionsSchema}
   "corrections": [
-    { "original": "<phrase exacte problématique de la réponse>", "issue": "<problème>", "suggestion": "<version améliorée>" }
+    { "original": "<phrase exacte problématique>", "issue": "<problème>", "suggestion": "<version améliorée>" }
   ],
-  "rewrite": "<version améliorée COMPLÈTE — minimum 80 mots, niveau académique, intègre les critères manquants>",
-  "detailedWhy": "<justification détaillée du score : 2-3 phrases techniques expliquant le niveau obtenu>"
+${rewriteSchema}
+  "detailedWhy": "<justification du score : 2-3 phrases techniques expliquant le niveau obtenu>"
 }`;
 }
 
@@ -1003,7 +1241,7 @@ async function runSectionAiEvaluation(io, sessionId) {
         docType: session.docType || session.sessionConfig?.docType || "article",
         level: session.level || "Master 2 / PFE",
         language: session.language || "FR + EN (auto)",
-        selectedSections: session.selectedSections || [],
+        selectedSections: [sectionKey, ...(session.selectedSections || [])],
         evaluationCriteria: session.evaluationCriteria || {},
       });
 

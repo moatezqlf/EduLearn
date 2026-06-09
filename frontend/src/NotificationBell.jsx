@@ -139,6 +139,7 @@ export default function NotificationBell() {
   const [open,          setOpen]         = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unread,        setUnread]        = useState(0);
+  const [toast,         setToast]         = useState(null); // { teacherName, question, joinCode }
 
   // ── Fetch notifications from server ──────────────────────
   const fetchNotifications = useCallback(async () => {
@@ -172,11 +173,30 @@ export default function NotificationBell() {
       };
       setNotifications(prev => [newNotif, ...prev]);
       setUnread(prev => prev + 1);
+      // Show floating toast banner for 10 seconds
+      setToast({ teacherName: payload.teacherName, question: payload.question, joinCode: payload.joinCode });
     };
 
     socket.on("new_session", handleNewSession);
     return () => socket.off("new_session", handleNewSession);
   }, [socket]);
+
+  // ── Inject slideUp keyframes once ────────────────────────
+  useEffect(() => {
+    const id = "nb-slideup-kf";
+    if (document.getElementById(id)) return;
+    const el = document.createElement("style");
+    el.id = id;
+    el.textContent = "@keyframes nbSlideUp{from{transform:translateY(30px);opacity:0}to{transform:translateY(0);opacity:1}}";
+    document.head.appendChild(el);
+  }, []);
+
+  // ── Auto-dismiss toast after 10s ─────────────────────────
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 10000);
+    return () => clearTimeout(id);
+  }, [toast]);
 
   // ── Close dropdown when clicking outside ─────────────────
   useEffect(() => {
@@ -216,6 +236,50 @@ export default function NotificationBell() {
 
   return (
     <div style={S.wrap} ref={wrapRef}>
+      {/* ── Floating toast banner (fixed position, outside normal flow) ── */}
+      {toast && (
+        <div style={{
+          position: "fixed", bottom: 28, right: 28, zIndex: 9999,
+          width: 360, background: "#fff", borderRadius: 16,
+          boxShadow: "0 8px 32px rgba(99,102,241,0.22)",
+          border: "2px solid #6366f1",
+          overflow: "hidden",
+          animation: "nbSlideUp 0.35s ease",
+        }}>
+          <div style={{ height: 4, background: "linear-gradient(90deg, #6366f1, #8b5cf6, #ec4899)" }} />
+          <div style={{ padding: "14px 16px" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <div style={{ fontSize: 28, flexShrink: 0 }}>📢</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#6366f1", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>
+                  Nouvelle session disponible
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 2 }}>
+                  {toast.teacherName}
+                </div>
+                <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.4, marginBottom: 10 }}>
+                  {toast.question?.slice(0, 90)}{toast.question?.length > 90 ? "…" : ""}
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button
+                    onClick={() => { setToast(null); navigate(`/join/${toast.joinCode}`); }}
+                    style={{ padding: "7px 16px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: "pointer" }}
+                  >
+                    Rejoindre → {toast.joinCode}
+                  </button>
+                  <button
+                    onClick={() => setToast(null)}
+                    style={{ background: "none", border: "none", color: "#94a3b8", fontSize: 12, cursor: "pointer", fontWeight: 600 }}
+                  >
+                    Ignorer
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Bell button */}
       <button style={S.btn} onClick={() => setOpen(o => !o)} title="Notifications">
         🔔

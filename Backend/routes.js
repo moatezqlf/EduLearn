@@ -989,6 +989,7 @@ router.post("/sessions/create", auth, role("teacher", "admin"), uploadSessionMed
       missingSection:     activityMode === "section_learn" ? (missingSection || selectedSections[0] || "") : "",
       articleTextContent: req.body.articleTextContent || "",
       sectionGuidance:    JSON.parse(req.body.sectionGuidance || "{}"),
+      sectionTimings:     JSON.parse(req.body.sectionTimings || "{}"),
       targetSpecialites: Array.isArray(targetSpecialites) ? targetSpecialites : [],
       sessionConfig: sessionConfig ? JSON.parse(sessionConfig) : undefined,
       videoUrl:     req.files?.video?.[0] ? `/uploads/videos/${req.files.video[0].filename}` : null,
@@ -1255,6 +1256,67 @@ router.get("/sessions/:id/results", auth, async (req, res) => {
     const submissions = await SessionSubmission.find({ sessionId: req.params.id })
       .sort({ aiScore: -1 });
     res.json({ topAnswer: submissions[0] || null, allFeedbacks: submissions });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════
+//  EVALUATE PEER FEEDBACK QUALITY  (LLM judge)
+// ══════════════════════════════════════════════════════════════
+router.post("/sessions/evaluate-feedback-quality", auth, async (req, res) => {
+  try {
+    const { sessionId, sectionKey, peerAnswer, feedbackText, criteria } = req.body;
+    if (!feedbackText?.trim()) return res.status(400).json({ message: "feedbackText required" });
+
+    const session = sessionId ? await Session.findById(sessionId).lean() : null;
+    const critList = Array.isArray(criteria) && criteria.length > 0
+      ? criteria
+      : (session?.evaluationCriteria?.[sectionKey] || []);
+
+    const criteriaBlock = critList.length > 0
+      ? `Critères d'évaluation de la section « ${sectionKey} » :\n${critList.map((c, i) => `${i + 1}. ${c}`).join("\n")}`
+      : `Section concernée : ${sectionKey || "inconnue"}`;
+
+    const prompt = `Tu es un expert pédagogique spécialisé en écriture scientifique.
+Tu dois évaluer la qualité d'un feedback écrit par un apprenant sur la production d'un pair.
+
+${criteriaBlock}
+
+Production du pair (section « ${sectionKey} ») :
+"""
+${(peerAnswer || "").slice(0, 1200)}
+"""
+
+Feedback de l'apprenant à évaluer :
+"""
+${feedbackText.slice(0, 800)}
+"""
+
+Évalue ce feedback selon ces 4 dimensions, réponds en JSON strict :
+{
+  "clarity": { "score": 1-4, "comment": "..." },
+  "relevance": { "score": 1-4, "comment": "..." },
+  "constructiveness": { "score": 1-4, "comment": "..." },
+  "domainAlignment": { "score": 1-4, "comment": "..." },
+  "overallScore": 1-4,
+  "summary": "résumé global du feedback en 2 phrases",
+  "strengths": ["point fort 1", "point fort 2"],
+  "improvements": ["à améliorer 1", "à améliorer 2"],
+  "validFeedback": true/false
+}
+
+Légende scores : 1=insuffisant, 2=à améliorer, 3=satisfaisant, 4=excellent
+"validFeedback" = true si le feedback est pertinent, clair et dans le domaine.
+Réponds UNIQUEMENT avec le JSON valide, sans markdown.`;
+
+    const raw = await callAi(prompt, 700);
+    let evaluation;
+    try {
+      evaluation = JSON.parse(raw.replace(/```json|```/g, "").trim());
+    } catch {
+      evaluation = { summary: raw, validFeedback: true, overallScore: 3, strengths: [], improvements: [] };
+    }
+
+    res.json({ evaluation });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 

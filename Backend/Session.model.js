@@ -162,6 +162,13 @@ const sessionSchema = new mongoose.Schema({
   articleTextContent:  { type: String, default: "" },
   sectionGuidance:     { type: mongoose.Schema.Types.Mixed, default: {} },
 
+  // ── Per-section time limits (minutes) ──
+  sectionTimings: { type: mongoose.Schema.Types.Mixed, default: {} }, // { "Introduction": 30, "Méthodes": 45 }
+
+  // ── Live timer state ──
+  phaseStartedAt: { type: Date, default: null },
+  phaseEndsAt:    { type: Date, default: null },
+
   // ── Section-by-section flow state ──
   // currentSectionKey is the active section being written/reviewed/evaluated.
   currentSectionIndex: { type: Number, default: 0 },

@@ -1,31 +1,55 @@
-/** Affiche les groupes automatiques (max 4 apprenants). */
+const ANON_COLORS = ["#6366f1", "#8b5cf6", "#ec4899", "#0ea5e9", "#14b8a6", "#f59e0b"];
+
 export default function GroupsPanel({ groups }) {
   if (!groups?.length) {
     return (
       <div style={st.empty}>
-        Les groupes seront formés automatiquement au passage en phase « Feedback pairs » (max. 4 par groupe).
+        <span style={{ fontSize: 20, marginRight: 8 }}>⏳</span>
+        Les groupes se forment automatiquement au passage en phase « Feedback pairs ».
       </div>
     );
   }
 
+  // Build a flat anonymous index across all groups so names stay consistent
+  let globalIdx = 0;
+
   return (
     <div style={st.wrap}>
-      <div style={st.title}>Groupes ({groups.length}) — max. 4 apprenants</div>
+      <div style={st.header}>
+        <span style={st.title}>👥 Groupes ({groups.length})</span>
+        <span style={st.subtitle}>max. 4 apprenants · anonymisé</span>
+      </div>
       <div style={st.grid}>
-        {groups.map((g, gi) => (
-          <div key={gi} style={st.groupCard}>
-            <div style={st.groupHead}>Groupe {gi + 1}</div>
-            <div style={st.members}>
-              {(g.members || []).map((m, mi) => (
-                <div key={m.id || mi} style={st.member}>
-                  <span style={st.avatar}>{(m.name || "?")[0].toUpperCase()}</span>
-                  <span style={st.name}>{m.name || "—"}</span>
-                  {m.isReceiver && <span style={st.badge}>★ Receveur</span>}
+        {groups.map((g, gi) => {
+          const members = g.members || [];
+          return (
+            <div key={gi} style={st.groupCard}>
+              <div style={st.groupHead}>
+                <div style={{ ...st.groupBadge, background: ANON_COLORS[gi % ANON_COLORS.length] + "1a", color: ANON_COLORS[gi % ANON_COLORS.length], border: `1px solid ${ANON_COLORS[gi % ANON_COLORS.length]}40` }}>
+                  Groupe {gi + 1}
                 </div>
-              ))}
+                <span style={st.memberCount}>{members.length} membres</span>
+              </div>
+              <div style={st.members}>
+                {members.map((m, mi) => {
+                  const idx = globalIdx++;
+                  const color = ANON_COLORS[idx % ANON_COLORS.length];
+                  return (
+                    <div key={m.id || mi} style={st.member}>
+                      <div style={{ ...st.avatar, background: color + "18", color }}>
+                        {String.fromCharCode(65 + idx)}
+                      </div>
+                      <span style={st.anonName}>Apprenant {String.fromCharCode(65 + idx)}</span>
+                      {m.isReceiver && (
+                        <span style={st.receiverBadge}>★ Receveur</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -33,25 +57,32 @@ export default function GroupsPanel({ groups }) {
 
 const st = {
   wrap: { marginTop: 20 },
-  title: { fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 12 },
-  grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 },
+  header: { display: "flex", alignItems: "baseline", gap: 10, marginBottom: 12 },
+  title: { fontSize: 14, fontWeight: 800, color: "#0f172a" },
+  subtitle: { fontSize: 11, color: "#94a3b8", fontWeight: 500 },
+  grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 10 },
   groupCard: {
-    background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14,
+    background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px",
+    boxShadow: "0 1px 3px rgba(0,0,0,.05)",
   },
-  groupHead: { fontSize: 12, fontWeight: 700, color: "#6366f1", marginBottom: 10 },
-  members: { display: "flex", flexDirection: "column", gap: 8 },
-  member: { display: "flex", alignItems: "center", gap: 8, fontSize: 13 },
+  groupHead: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
+  groupBadge: { fontSize: 11, fontWeight: 800, padding: "3px 10px", borderRadius: 999 },
+  memberCount: { fontSize: 10, color: "#94a3b8", fontWeight: 600 },
+  members: { display: "flex", flexDirection: "column", gap: 7 },
+  member: { display: "flex", alignItems: "center", gap: 8 },
   avatar: {
-    width: 28, height: 28, borderRadius: "50%", background: "#eef2ff", color: "#6366f1",
-    display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12,
+    width: 28, height: 28, borderRadius: "50%",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    fontWeight: 800, fontSize: 12, flexShrink: 0,
   },
-  name: { flex: 1, color: "#334155", fontWeight: 500 },
-  badge: {
-    fontSize: 10, fontWeight: 700, color: "#059669", background: "#d1fae5",
-    padding: "2px 8px", borderRadius: 99,
+  anonName: { flex: 1, color: "#374151", fontWeight: 600, fontSize: 12 },
+  receiverBadge: {
+    fontSize: 9, fontWeight: 700, color: "#059669", background: "#d1fae5",
+    padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap",
   },
   empty: {
-    marginTop: 16, padding: 14, background: "#f8fafc", borderRadius: 10,
+    marginTop: 16, padding: "12px 14px", background: "#f8fafc", borderRadius: 10,
     fontSize: 13, color: "#64748b", lineHeight: 1.5, border: "1px dashed #e2e8f0",
+    display: "flex", alignItems: "center",
   },
 };

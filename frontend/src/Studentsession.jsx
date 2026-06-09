@@ -172,6 +172,14 @@ export default function StudentSession() {
   const [reviewIdx, setReviewIdx]   = useState(0);
   const [reviewPackLoaded, setReviewPackLoaded] = useState(false);
 
+  // Timers
+  const [phaseEndsAt, setPhaseEndsAt]       = useState(null); // ISO string (writing phase, from server)
+  const [timeLeft, setTimeLeft]             = useState(null); // seconds remaining (writing)
+  const [sectionTimings, setSectionTimings] = useState({});  // { Introduction: 30, Introduction_read: 10 }
+  const [readEndsAt, setReadEndsAt]         = useState(null); // local reading countdown (ISO string)
+  const [readTimeLeft, setReadTimeLeft]     = useState(null); // seconds
+  const autoSubmittedRef                    = useRef(false);
+
   // Writing
   const [answer, setAnswer]           = useState("");
   const [submitted, setSubmitted]     = useState(false);
@@ -201,6 +209,45 @@ export default function StudentSession() {
 
   const [connected, setConnected]     = useState(false);
   const [error, setError]             = useState("");
+
+  // Countdown timer (writing) — updates every second
+  useEffect(() => {
+    if (!phaseEndsAt) { setTimeLeft(null); return; }
+    const tick = () => {
+      const diff = Math.max(0, Math.floor((new Date(phaseEndsAt) - Date.now()) / 1000));
+      setTimeLeft(diff);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [phaseEndsAt]);
+
+  // Reading countdown timer — auto-advance tab 1 → 2 when expires
+  useEffect(() => {
+    if (!readEndsAt) { setReadTimeLeft(null); return; }
+    const tick = () => {
+      const diff = Math.max(0, Math.floor((new Date(readEndsAt) - Date.now()) / 1000));
+      setReadTimeLeft(diff);
+      if (diff === 0) {
+        setActiveWritingTab(2);
+        setStudentLearnStep("write");
+        setArticleRead(true);
+        setReadEndsAt(null);
+      }
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [readEndsAt]);
+
+  // Auto-submit when writing timer expires
+  useEffect(() => {
+    if (timeLeft !== 0 || submitted || autoSubmittedRef.current) return;
+    if (!answer.trim()) return;
+    autoSubmittedRef.current = true;
+    handleSubmitAnswer();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeLeft]);
 
   // If we arrived from /join/:code, prefill code and name (from logged-in user)
   useEffect(() => {
@@ -255,7 +302,9 @@ export default function StudentSession() {
         articleSections: artSec, missingSection: missSec,
         articleFileUrl: artUrl, articleFileName: artName, articleFileMime: artMime,
         resourceType: rType, activityMode: actMode,
-        sectionGuidance: sg, articleTextContent: atc } = payload;
+        sectionGuidance: sg, articleTextContent: atc,
+        phaseEndsAt: pha,
+        sectionTimings: stim } = payload;
       console.log("Received session_info, sessionId:", sid);
       setQuestion(q || "");
       setInstructions(i || "");
@@ -280,6 +329,8 @@ export default function StudentSession() {
       if (lang != null) setSessionLanguage(lang || "");
       if (sg && typeof sg === "object") setSectionGuidance(sg);
       if (atc) setArticleTextContent(atc);
+      if (pha) setPhaseEndsAt(pha);
+      if (stim && typeof stim === "object") setSectionTimings(stim);
     });
 
     socket.on("phase_changed", (data) => {
@@ -301,17 +352,31 @@ export default function StudentSession() {
       if (data?.articleFileName) setArticleFileName(data.articleFileName);
       if (data?.articleFileMime) setArticleFileMime(data.articleFileMime);
       if (data?.resourceType) setSessionResourceType(data.resourceType);
+      // Timer
+      setPhaseEndsAt(data?.phaseEndsAt || null);
+      if (data?.sectionTimings) setSectionTimings(data.sectionTimings);
       if (p === "writing") {
         setSubmitted(false);
         setAnswer("");
         setArticleRead(false);
         setStudentLearnStep("read");
+        autoSubmittedRef.current = false;
+        // Start local reading countdown if configured
+        const sk = data?.currentSectionKey || data?.missingSection || "";
+        const timings = data?.sectionTimings || {};
+        const readMins = Number(timings[sk + "_read"] || 0);
+        if (readMins > 0) {
+          setReadEndsAt(new Date(Date.now() + readMins * 60 * 1000).toISOString());
+        } else {
+          setReadEndsAt(null);
+        }
       }
       if (p === "review") {
         setReviewSubmitted(false);
         setReviewAssignments([]);
         setReviewIdx(0);
         setReviewPackLoaded(false);
+        setPhaseEndsAt(null);
       }
     });
 
@@ -601,6 +666,23 @@ export default function StudentSession() {
         {phase === "writing" && (
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span style={{ fontSize: 13, color: "#64748b", fontWeight: 600 }}>{wordCount} mot{wordCount !== 1 ? "s" : ""}</span>
+            {timeLeft !== null && (
+              <div style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "6px 14px", borderRadius: 999,
+                background: timeLeft <= 60 ? "#fef2f2" : timeLeft <= 300 ? "#fffbeb" : "#eef2ff",
+                border: `2px solid ${timeLeft <= 60 ? "#fca5a5" : timeLeft <= 300 ? "#fde68a" : "#c7d2fe"}`,
+              }}>
+                <span style={{ fontSize: 16 }}>{timeLeft <= 60 ? "🔴" : timeLeft <= 300 ? "🟡" : "⏱"}</span>
+                <span style={{
+                  fontSize: 15, fontWeight: 800, fontVariantNumeric: "tabular-nums",
+                  color: timeLeft <= 60 ? "#dc2626" : timeLeft <= 300 ? "#d97706" : "#4338ca",
+                }}>
+                  {String(Math.floor(timeLeft / 60)).padStart(2, "0")}:{String(timeLeft % 60).padStart(2, "0")}
+                </span>
+                {timeLeft <= 60 && <span style={{ fontSize: 11, fontWeight: 700, color: "#dc2626" }}>Temps écoulé!</span>}
+              </div>
+            )}
             <div style={styles.connBadge}>
               <span style={{ ...styles.connDot, background: connected ? "#22c55e" : "#ef4444" }} />
               {connected ? "Connecté" : "Reconnexion…"}
@@ -621,38 +703,12 @@ export default function StudentSession() {
         {phase === "writing" && (
           <div style={nw.page}>
 
-            {/* Progress tracker */}
-            <div style={nw.progressCard}>
-              <div style={nw.progressTitle}>PROGRESSION DU PARCOURS</div>
-              <div style={nw.progressSteps}>
-                {[
-                  { n: 0, icon: "✓", label: "Brief du teacher", sub: "Consigne + objectifs", done: true },
-                  { n: 1, icon: "1", label: "Lire l'article complet", sub: "Comprendre la structure", active: activeWritingTab === 1 && !submitted },
-                  { n: 2, icon: "2", label: "Compléter la section manquante", sub: "Lire + rédiger + soumettre", active: activeWritingTab === 2 && !submitted },
-                  { n: 3, icon: "3", label: "Feedback du teacher", sub: "Évaluation + itération", active: activeWritingTab === 3 || submitted },
-                ].map((s, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 0 }}>
-                    <div style={{ ...nw.progressStep, background: s.done ? "#dcfce7" : s.active ? "#ede9fe" : "#f8fafc", border: `2px solid ${s.done ? "#22c55e" : s.active ? "#8b5cf6" : "#e2e8f0"}` }}>
-                      <div style={{ ...nw.progressNum, background: s.done ? "#22c55e" : s.active ? "#8b5cf6" : "#e2e8f0", color: s.done || s.active ? "#fff" : "#94a3b8" }}>
-                        {s.done ? "✓" : s.icon}
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: s.done ? "#15803d" : s.active ? "#6d28d9" : "#64748b" }}>{s.label}</div>
-                        <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{s.sub}</div>
-                      </div>
-                    </div>
-                    {i < 3 && <div style={nw.progressArrow}>›</div>}
-                  </div>
-                ))}
-              </div>
-            </div>
-
             {/* Tab bar */}
             <div style={nw.tabBar}>
               {[
-                { t: 1, label: "① Article complet" },
-                { t: 2, label: "② Section à compléter" },
-                { t: 3, label: "③ Soumission & feedback" },
+                { t: 1, label: "① Section à apprendre" },
+                { t: 2, label: "② Section à rédiger" },
+                { t: 3, label: "③ Résultat & feedback IA" },
               ].map(tb => (
                 <button key={tb.t} type="button"
                   onClick={() => { setActiveWritingTab(tb.t); if (tb.t === 2) { setStudentLearnStep("write"); setArticleRead(true); } }}
@@ -662,9 +718,18 @@ export default function StudentSession() {
               ))}
             </div>
 
-            {/* ── Tab 1 : Article complet ── */}
+            {/* ── Tab 1 : Section à apprendre ── */}
             {activeWritingTab === 1 && (
               <div style={nw.tabContent}>
+                {/* Reading timer banner */}
+                {readTimeLeft !== null && readTimeLeft > 0 && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", background: readTimeLeft <= 60 ? "#fef2f2" : "#fffbeb", border: `1px solid ${readTimeLeft <= 60 ? "#fca5a5" : "#fde68a"}`, borderRadius: 10, marginBottom: 14 }}>
+                    <span style={{ fontSize: 18 }}>{readTimeLeft <= 60 ? "🔴" : "⏱"}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: readTimeLeft <= 60 ? "#dc2626" : "#d97706" }}>
+                      Temps de lecture : {String(Math.floor(readTimeLeft / 60)).padStart(2, "0")}:{String(readTimeLeft % 60).padStart(2, "0")} — Puis passage automatique à la rédaction
+                    </span>
+                  </div>
+                )}
                 <ArticleDocumentPanel
                   question={question}
                   instructions={instructions}
@@ -675,8 +740,8 @@ export default function StudentSession() {
                   missingSection={missingSection || activeSectionKey}
                   resourceType={sessionResourceType}
                   mode="complete"
-                  onContinue={() => { setActiveWritingTab(2); setStudentLearnStep("write"); setArticleRead(true); }}
-                  continueLabel="J'ai lu l'article — Passer à l'exercice →"
+                  onContinue={() => { setActiveWritingTab(2); setStudentLearnStep("write"); setArticleRead(true); setReadEndsAt(null); }}
+                  continueLabel="J'ai lu — Passer à la rédaction →"
                 />
               </div>
             )}
@@ -688,13 +753,16 @@ export default function StudentSession() {
                 <div style={nw.articleHeader}>
                   <div style={{ flex: 1 }}>
                     <span style={{ fontSize: 15, fontWeight: 700, color: "#1e293b" }}>
-                      ✍️ Article à compléter —{" "}
+                      ✍️ Section à apprendre —{" "}
                     </span>
                     <span style={{ fontSize: 15, fontWeight: 700, color: "#8b5cf6" }}>
-                      section manquante : {missingSection || activeSectionKey}
+                      {missingSection || activeSectionKey}
                     </span>
+                    <div style={{ fontSize: 12, color: "#6d28d9", marginTop: 4, background: "#f5f3ff", padding: "5px 10px", borderRadius: 8, display: "inline-block" }}>
+                      💡 Lis attentivement l'article (onglet ①), puis complète cette section. Appuie-toi sur les critères à gauche et les amorces de phrases.
+                    </div>
                   </div>
-                  <div style={nw.sectionBadgeLg}>SECTION À COMPLÉTER<br/>PAR L'APPRENANT</div>
+                  <div style={nw.sectionBadgeLg}>SECTION À<br/>APPRENDRE</div>
                 </div>
 
                 {/* Left col: criteria + starters | Right col: article + inline writing */}
@@ -768,10 +836,13 @@ export default function StudentSession() {
 
                     {/* Inline writing box */}
                     <div style={nw.inlineWritingBox}>
-                      <div style={nw.inlineBadge}>SECTION À COMPLÉTER PAR L'APPRENANT</div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: "#92400e", marginBottom: 6 }}>
-                        Section — <span style={{ color: "#8b5cf6" }}>{missingSection || activeSectionKey}</span>
-                        {" "}— à toi de jouer. Inspire-toi de la structure vue à l'étape 1.
+                      <div style={nw.inlineBadge}>✍️ SECTION À APPRENDRE</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#6d28d9", marginBottom: 4 }}>
+                        <span style={{ color: "#8b5cf6" }}>{missingSection || activeSectionKey}</span>
+                        {" "}— C'est à toi !
+                      </div>
+                      <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10, lineHeight: 1.5, background: "#faf5ff", padding: "8px 12px", borderRadius: 8, border: "1px solid #e9d5ff" }}>
+                        Si tu veux mieux compléter cette section, retourne lire l'article complet dans l'onglet ①. La structure de l'article de référence t'aidera à comprendre ce que doit contenir la section <strong>{missingSection || activeSectionKey}</strong>.
                       </div>
                       <textarea
                         style={nw.writingTextarea}
@@ -863,7 +934,7 @@ export default function StudentSession() {
                                 return (
                                   <div key={key} style={styles.criteriaScoreCard}>
                                     <div style={styles.criteriaScoreHeader}>
-                                      <span style={styles.criteriaScoreLabel}>{{ clarity: "💡 Clarté", structure: "🏗️ Structure", argumentation: "📣 Argumentation", scientific: "🔬 Scientifique" }[key] || key}</span>
+                                      <span style={styles.criteriaScoreLabel}>{val?.label || { clarity: "💡 Clarté", structure: "🏗️ Structure", argumentation: "📣 Argumentation", scientific: "🔬 Scientifique" }[key] || key}</span>
                                       <span style={styles.criteriaScoreValue}>{hasSc ? `${sc}/5` : "—"}</span>
                                     </div>
                                     {hasSc && <div style={styles.criteriaScoreBar}><div style={{ ...styles.criteriaScoreFill, width: `${(sc/5)*100}%`, background: sc>=4?"#22c55e":sc>=3?"#f59e0b":"#ef4444" }} /></div>}
@@ -918,14 +989,6 @@ export default function StudentSession() {
         {/* ── PEER REVIEW PHASE ── */}
         {phase === "review" && (
           <div style={styles.mainCol}>
-            <TeacherSessionBrief
-              question={question}
-              activeSectionKey={activeSectionKey}
-              sectionCriteriaList={sectionCriteriaList}
-              docType={sessionDocType}
-              level={sessionLevel}
-              language={sessionLanguage}
-            />
             {!reviewPackLoaded && !reviewSubmitted ? (
               <div style={styles.doneCard}>
                 <div style={styles.spinner} />
@@ -957,6 +1020,7 @@ export default function StudentSession() {
                 sessionId={sessionId}
                 question={question}
                 sectionKey={currentSectionKey || selectedSections[0]}
+                sectionCriteria={sectionCriteriaList}
                 styles={styles}
               />
             ) : isReceiver && reviewAssignments.length === 0 ? (
@@ -1013,14 +1077,6 @@ export default function StudentSession() {
         {/* ── RESULTS PHASE ── */}
         {phase === "results" && (
           <div style={styles.mainCol}>
-            <TeacherSessionBrief
-              question={question}
-              activeSectionKey={activeSectionKey}
-              sectionCriteriaList={sectionCriteriaList}
-              docType={sessionDocType}
-              level={sessionLevel}
-              language={sessionLanguage}
-            />
             <div style={styles.card}>
               <div style={styles.cardTitle}>
                 📊 Résultats de la session
@@ -1028,76 +1084,113 @@ export default function StudentSession() {
                   <span style={{ fontWeight: 500, color: "#6366f1" }}> — {results.sectionResults.sectionKey}</span>
                 )}
               </div>
-              {(results?.topAnswer || results?.sectionResults?.bestAnswer) && (
-                <div style={styles.topAnswerCard}>
-                  <div style={styles.topAnswerLabel}>🏆 Best Answer this Round</div>
-                  <div style={styles.topAnswerAuthor}>
-                    by {(results.topAnswer || results.sectionResults?.bestAnswer).studentName}
-                  </div>
-                  <p style={styles.topAnswerText}>{(results.topAnswer || results.sectionResults?.bestAnswer).content}</p>
-                  <div style={styles.topAnswerScore}>
-                    AI Score: {(results.topAnswer || results.sectionResults?.bestAnswer).aiScore ?? "—"}/20
-                  </div>
-                  {results?.sectionResults?.bestAnswerReason && (
-                    <div style={{ marginTop: 10, fontSize: 13, color: "#7c2d12", lineHeight: 1.5 }}>
-                      Why this answer: {results.sectionResults.bestAnswerReason}
+              {(results?.topAnswer || results?.sectionResults?.bestAnswer) && (() => {
+                const best = results.topAnswer || results.sectionResults?.bestAnswer;
+                const fb   = best?.aiFeedback || {};
+                const score = best?.aiScore ?? null;
+                const scoreColor = score == null ? "#6366f1" : score >= 15 ? "#22c55e" : score >= 10 ? "#f59e0b" : "#ef4444";
+                const levelLabels = { "Excellent (18-20)": "Excellent", "Très bien (15-17)": "Très bien", "Bien (12-14)": "Bien", "Satisfaisant (10-11)": "Satisfaisant", "Insuffisant (6-9)": "Insuffisant", "Faible (0-5)": "Faible" };
+                const level = levelLabels[fb.level] || fb.level || "";
+                const CRIT_LABELS = { clarity: "💡 Clarté", structure: "🏗️ Structure", argumentation: "📣 Argumentation", scientific: "🔬 Précision scientifique", concision: "✂️ Concision", precision: "🎯 Précision", keywords: "🔑 Mots-clés", formulation: "📝 Formulation", context: "🌐 Contexte/Problème", objective: "🎯 Objectif", method: "🧪 Méthode", results_conclusion: "📊 Résultats/Conclusion", funnel: "🔽 Entonnoir", literature: "📚 Revue de littérature", gap: "🔍 Lacune identifiée", sample: "👥 Participants", instruments: "🛠️ Matériel & Mesures", procedure: "📋 Procédure", analysis: "📐 Analyse statistique", data: "📊 Données", order: "🔢 Ordre logique", objectivity: "⚖️ Objectivité", significance: "📈 Signification stat.", interpretation: "💭 Interprétation", comparison: "🔄 Comparaison littérature", limitations: "⚠️ Limites", implications: "💡 Implications", synthesis: "📝 Synthèse", answer: "✅ Réponse objectif", perspectives: "🔭 Perspectives" };
+                const cs = (fb.criteriaScores && typeof fb.criteriaScores === "object") ? fb.criteriaScores : {};
+                const criteriaEntries = Object.entries(cs).filter(([, v]) => v && v.score != null);
+                return (
+                  <div style={{ background: "#fffbeb", borderRadius: 14, border: "1px solid #fde68a", overflow: "hidden", marginBottom: 8 }}>
+                    {/* Header */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", background: "#fef9c3", borderBottom: "1px solid #fde68a" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ fontSize: 22 }}>🏆</span>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 800, color: "#92400e" }}>Meilleure réponse de la session</div>
+                          <div style={{ fontSize: 11, color: "#a16207", marginTop: 2 }}>Section : <strong>{results.sectionResults?.sectionKey || activeSectionKey}</strong></div>
+                        </div>
+                      </div>
+                      {score != null && (
+                        <div style={{ textAlign: "center" }}>
+                          <div style={{ fontSize: 26, fontWeight: 900, color: scoreColor }}>{score}<span style={{ fontSize: 14, color: "#94a3b8" }}>/20</span></div>
+                          {level && <div style={{ fontSize: 11, fontWeight: 700, color: scoreColor, background: scoreColor + "18", padding: "2px 8px", borderRadius: 999 }}>{level}</div>}
+                        </div>
+                      )}
                     </div>
-                  )}
-                  {(results.topAnswer || results.sectionResults?.bestAnswer)?.aiFeedback?.basic && (
-                    <div style={{ marginTop: 10, fontSize: 13, color: "#92400e", lineHeight: 1.6 }}>
-                      AI rationale: {(results.topAnswer || results.sectionResults?.bestAnswer).aiFeedback.basic}
+
+                    {/* Answer text */}
+                    <div style={{ padding: "14px 18px", background: "#fff", borderBottom: "1px solid #fde68a" }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#a16207", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Contenu de la réponse</div>
+                      <p style={{ margin: 0, fontSize: 14, lineHeight: 1.7, color: "#1e293b", whiteSpace: "pre-wrap" }}>{best.content}</p>
                     </div>
-                  )}
-                  {(() => {
-                    const fb = (results.topAnswer || results.sectionResults?.bestAnswer)?.aiFeedback || {};
-                    const cs = fb.criteriaScores && typeof fb.criteriaScores === "object" ? fb.criteriaScores : {};
-                    const entries = Object.entries(cs).filter(([, v]) => v && (v.score != null || v.comment));
-                    if (!entries.length) return null;
-                    return (
-                      <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 8, border: "1px solid #fde68a", background: "#fffbea" }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e", marginBottom: 6 }}>Evaluation detaillee</div>
-                        {entries.map(([k, v]) => (
-                          <div key={k} style={{ fontSize: 12, color: "#78350f", marginBottom: 4 }}>
-                            <strong>{k}</strong>: {v.score ?? "—"}/5 {v.comment ? `- ${v.comment}` : ""}
+
+                    {/* Reason */}
+                    {results?.sectionResults?.bestAnswerReason && (
+                      <div style={{ padding: "10px 18px", fontSize: 12, color: "#78350f", lineHeight: 1.6, background: "#fffde7", borderBottom: "1px solid #fde68a" }}>
+                        <span style={{ fontWeight: 700 }}>Pourquoi cette réponse ? </span>{results.sectionResults.bestAnswerReason}
+                      </div>
+                    )}
+
+                    {/* AI assessment */}
+                    {fb.basic && (
+                      <div style={{ padding: "12px 18px", borderBottom: criteriaEntries.length ? "1px solid #fde68a" : "none" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Évaluation IA</div>
+                        <p style={{ margin: 0, fontSize: 13, color: "#78350f", lineHeight: 1.65 }}>{fb.basic}</p>
+                      </div>
+                    )}
+
+                    {/* Criteria grid */}
+                    {criteriaEntries.length > 0 && (
+                      <div style={{ padding: "12px 18px", borderBottom: (fb.strengths?.length || fb.weaknesses?.length || fb.feedForward?.length) ? "1px solid #fde68a" : "none" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>Détail par critère</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                          {criteriaEntries.map(([k, v]) => {
+                            const pct = ((v.score || 0) / 5) * 100;
+                            const cc = v.score >= 4 ? "#22c55e" : v.score >= 3 ? "#3b82f6" : v.score >= 2 ? "#f59e0b" : "#ef4444";
+                            return (
+                              <div key={k} style={{ background: "#fff", border: "1px solid #fde68a", borderRadius: 10, padding: "10px 12px" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                                  <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>{v?.label || CRIT_LABELS[k] || k}</span>
+                                  <span style={{ fontSize: 13, fontWeight: 800, color: cc }}>{v.score}/5</span>
+                                </div>
+                                <div style={{ height: 4, background: "#f1f5f9", borderRadius: 99, marginBottom: 6 }}>
+                                  <div style={{ height: "100%", width: `${pct}%`, background: cc, borderRadius: 99 }} />
+                                </div>
+                                {v.comment && <p style={{ margin: 0, fontSize: 11, color: "#64748b", lineHeight: 1.4 }}>{v.comment}</p>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Strengths / Weaknesses / FeedForward */}
+                    {(fb.strengths?.length > 0 || fb.weaknesses?.length > 0 || fb.feedForward?.length > 0) && (
+                      <div style={{ padding: "12px 18px", display: "grid", gridTemplateColumns: fb.feedForward?.length ? "1fr 1fr 1fr" : "1fr 1fr", gap: 10 }}>
+                        {fb.strengths?.length > 0 && (
+                          <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "10px 12px" }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: "#166534", marginBottom: 6 }}>✓ Points forts</div>
+                            <ul style={{ margin: 0, paddingLeft: 14, fontSize: 11, color: "#374151", lineHeight: 1.6 }}>
+                              {fb.strengths.map((s, i) => <li key={i}>{s}</li>)}
+                            </ul>
                           </div>
-                        ))}
+                        )}
+                        {fb.weaknesses?.length > 0 && (
+                          <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "10px 12px" }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 6 }}>⚠ À améliorer</div>
+                            <ul style={{ margin: 0, paddingLeft: 14, fontSize: 11, color: "#374151", lineHeight: 1.6 }}>
+                              {fb.weaknesses.map((s, i) => <li key={i}>{s}</li>)}
+                            </ul>
+                          </div>
+                        )}
+                        {fb.feedForward?.length > 0 && (
+                          <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "10px 12px" }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: "#1e3a8a", marginBottom: 6 }}>→ Feed-forward</div>
+                            <ul style={{ margin: 0, paddingLeft: 14, fontSize: 11, color: "#374151", lineHeight: 1.6 }}>
+                              {fb.feedForward.map((s, i) => <li key={i}>{s}</li>)}
+                            </ul>
+                          </div>
+                        )}
                       </div>
-                    );
-                  })()}
-                  {(() => {
-                    const fb = (results.topAnswer || results.sectionResults?.bestAnswer)?.aiFeedback || {};
-                    const strengths = fb.strengths || [];
-                    const weaknesses = fb.weaknesses || [];
-                    const suggestions = fb.suggestions || [];
-                    if (!strengths.length && !weaknesses.length && !suggestions.length) return null;
-                    return (
-                      <div style={{ marginTop: 12, fontSize: 12, lineHeight: 1.6 }}>
-                        {strengths.length > 0 && <div style={{ color: "#166534" }}><strong>Forces:</strong> {strengths.join(" | ")}</div>}
-                        {weaknesses.length > 0 && <div style={{ color: "#9a3412" }}><strong>Weaknesses:</strong> {weaknesses.join(" | ")}</div>}
-                        {suggestions.length > 0 && <div style={{ color: "#3730a3" }}><strong>Suggestions precises:</strong> {suggestions.join(" | ")}</div>}
-                      </div>
-                    );
-                  })()}
-                  {(() => {
-                    const fb = (results.topAnswer || results.sectionResults?.bestAnswer)?.aiFeedback || {};
-                    if (!fb.detailedWhy || fb.detailedWhy === fb.basic) return null;
-                    return (
-                      <div style={{ marginTop: 10, fontSize: 12, color: "#78350f", lineHeight: 1.6 }}>
-                        <strong>Detailed evaluation:</strong> {fb.detailedWhy}
-                      </div>
-                    );
-                  })()}
-                  {(() => {
-                    const ff = (results.topAnswer || results.sectionResults?.bestAnswer)?.aiFeedback?.feedForward;
-                    if (!Array.isArray(ff) || !ff.length) return null;
-                    return (
-                      <div style={{ marginTop: 10, fontSize: 12, color: "#1e3a5f", lineHeight: 1.6 }}>
-                        <strong>Feed-forward:</strong> {ff.join(" · ")}
-                      </div>
-                    );
-                  })()}
-                </div>
-              )}
+                    )}
+                  </div>
+                );
+              })()}
               {versions.length > 0 && (
                 <div style={{ marginTop: 20 }}>
                   <div style={styles.layerLabel}>📈 Your Writing Progress</div>
