@@ -240,6 +240,9 @@ export default function ArticleCutterTool({
   const [storedFile, setStoredFile] = useState(null); // keep File object for OCR re-send
   const [viewMode, setViewMode] = useState("raw"); // "raw" | "structured"
   const [structuredSections, setStructuredSections] = useState({}); // after clean+structure
+  const [sectionsOpen, setSectionsOpen] = useState(true);
+  const [formatsOpen, setFormatsOpen]   = useState(false);
+  const [amorcesOpen, setAmorcesOpen]   = useState(true);
 
   const taRef   = useRef(null);
   const fileRef = useRef(null);
@@ -482,40 +485,46 @@ export default function ArticleCutterTool({
 
         {/* Section picker */}
         <div style={s.sideBlock}>
-          <div style={s.sideLabel}>🎯 Section à découper</div>
-          <p style={{ fontSize: 11, color: "#94a3b8", margin: "0 0 10px", lineHeight: 1.4 }}>
-            Cliquez pour cibler la section à cacher aux étudiants.
-          </p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-            {effectiveSections.map(name => {
-              const isSel = missingSection === name;
-              const color = SECTION_COLORS[name] || "#6366f1";
-              const dot = DIFF_DOT[SECTION_DIFF[name]] || "#94a3b8";
-              return (
-                <button key={name} type="button" onClick={() => onMissingChange?.(name)} style={{
-                  padding: "6px 11px", borderRadius: 999, border: isSel ? `2px solid ${color}` : "2px solid #e2e8f0",
-                  background: isSel ? `${color}15` : "#fff", color: isSel ? color : "#64748b",
-                  fontWeight: isSel ? 700 : 500, fontSize: 12, cursor: "pointer",
-                  display: "flex", alignItems: "center", gap: 5,
-                }}>
-                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: isSel ? dot : "#d1d5db", display: "inline-block" }} />
-                  {name}
-                </button>
-              );
-            })}
-            {/* Add custom section */}
-            {addingSection ? (
-              <form onSubmit={e => { e.preventDefault(); if (newSectionName.trim()) { setCustomSections(p => [...p, newSectionName.trim()]); } setNewSectionName(""); setAddingSection(false); }} style={{ display: "flex", gap: 4, width: "100%" }}>
-                <input autoFocus value={newSectionName} onChange={e => setNewSectionName(e.target.value)} placeholder="Nom de la section…" style={s.miniInput} />
-                <button type="submit" style={s.miniBtn}>✓</button>
-                <button type="button" onClick={() => setAddingSection(false)} style={{ ...s.miniBtn, background: "#fee2e2", color: "#dc2626" }}>×</button>
-              </form>
-            ) : (
-              <button type="button" onClick={() => setAddingSection(true)} style={s.addSectionBtn}>
-                🟡 + Section perso
-              </button>
-            )}
+          <div style={{ ...s.sideLabel, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", userSelect: "none", marginBottom: sectionsOpen ? 10 : 0 }} onClick={() => setSectionsOpen(o => !o)}>
+            <span>🎯 Section à découper</span>
+            <span style={{ fontSize: 9, color: "#94a3b8", display: "inline-block", transition: "transform .2s", transform: sectionsOpen ? "rotate(90deg)" : "rotate(0deg)" }}>▶</span>
           </div>
+          {sectionsOpen && (
+            <>
+              <p style={{ fontSize: 11, color: "#94a3b8", margin: "0 0 10px", lineHeight: 1.4 }}>
+                Cliquez pour cibler la section à cacher aux étudiants.
+              </p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+                {effectiveSections.map(name => {
+                  const isSel = missingSection === name;
+                  const color = SECTION_COLORS[name] || "#6366f1";
+                  const dot = DIFF_DOT[SECTION_DIFF[name]] || "#94a3b8";
+                  return (
+                    <button key={name} type="button" onClick={() => onMissingChange?.(name)} style={{
+                      padding: "6px 11px", borderRadius: 999, border: isSel ? `2px solid ${color}` : "2px solid #e2e8f0",
+                      background: isSel ? `${color}15` : "#fff", color: isSel ? color : "#64748b",
+                      fontWeight: isSel ? 700 : 500, fontSize: 12, cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 5,
+                    }}>
+                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: isSel ? dot : "#d1d5db", display: "inline-block" }} />
+                      {name}
+                    </button>
+                  );
+                })}
+                {addingSection ? (
+                  <form onSubmit={e => { e.preventDefault(); if (newSectionName.trim()) { setCustomSections(p => [...p, newSectionName.trim()]); } setNewSectionName(""); setAddingSection(false); }} style={{ display: "flex", gap: 4, width: "100%" }}>
+                    <input autoFocus value={newSectionName} onChange={e => setNewSectionName(e.target.value)} placeholder="Nom de la section…" style={s.miniInput} />
+                    <button type="submit" style={s.miniBtn}>✓</button>
+                    <button type="button" onClick={() => setAddingSection(false)} style={{ ...s.miniBtn, background: "#fee2e2", color: "#dc2626" }}>×</button>
+                  </form>
+                ) : (
+                  <button type="button" onClick={() => setAddingSection(true)} style={s.addSectionBtn}>
+                    🟡 + Section perso
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Auto-detected sections panel */}
@@ -558,8 +567,11 @@ export default function ArticleCutterTool({
 
         {/* Formats */}
         <div style={s.sideBlock}>
-          <div style={s.sideLabel}>📂 Formats acceptés</div>
-          {[
+          <div style={{ ...s.sideLabel, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", userSelect: "none", marginBottom: formatsOpen ? 10 : 0 }} onClick={() => setFormatsOpen(o => !o)}>
+            <span>📂 Formats acceptés</span>
+            <span style={{ fontSize: 9, color: "#94a3b8", display: "inline-block", transition: "transform .2s", transform: formatsOpen ? "rotate(90deg)" : "rotate(0deg)" }}>▶</span>
+          </div>
+          {formatsOpen && [
             { ext: "PDF", desc: "texte + OCR", color: "#fee2e2", tc: "#dc2626" },
             { ext: "DOCX", desc: ".docx", color: "#dbeafe", tc: "#2563eb" },
             { ext: "TXT", desc: ".txt / .md", color: "#f3f4f6", tc: "#374151" },
@@ -577,16 +589,23 @@ export default function ArticleCutterTool({
         {/* Starters */}
         {missingSection && (
           <div style={s.sideBlock}>
-            <div style={s.sideLabel}>💡 Amorces — {missingSection}</div>
-            {currentStarters.map((st, i) => (
-              <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
-                <span style={{ fontSize: 12, color: "#94a3b8", minWidth: 14 }}>{i + 1}.</span>
-                <input type="text" value={st} onChange={e => updateStarter(i, e.target.value)}
-                  style={s.starterInput} placeholder={`Amorce ${i + 1}…`} />
-                <button type="button" onClick={() => removeStarter(i)} style={s.xBtn}>×</button>
-              </div>
-            ))}
-            <button type="button" onClick={addStarter} style={s.addStarterBtn}>+ Ajouter une amorce</button>
+            <div style={{ ...s.sideLabel, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", userSelect: "none", marginBottom: amorcesOpen ? 10 : 0 }} onClick={() => setAmorcesOpen(o => !o)}>
+              <span>💡 Amorces — {missingSection}</span>
+              <span style={{ fontSize: 9, color: "#94a3b8", display: "inline-block", transition: "transform .2s", transform: amorcesOpen ? "rotate(90deg)" : "rotate(0deg)" }}>▶</span>
+            </div>
+            {amorcesOpen && (
+              <>
+                {currentStarters.map((st, i) => (
+                  <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, color: "#94a3b8", minWidth: 14 }}>{i + 1}.</span>
+                    <input type="text" value={st} onChange={e => updateStarter(i, e.target.value)}
+                      style={s.starterInput} placeholder={`Amorce ${i + 1}…`} />
+                    <button type="button" onClick={() => removeStarter(i)} style={s.xBtn}>×</button>
+                  </div>
+                ))}
+                <button type="button" onClick={addStarter} style={s.addStarterBtn}>+ Ajouter une amorce</button>
+              </>
+            )}
           </div>
         )}
       </div>

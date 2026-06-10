@@ -10,7 +10,7 @@ import { LEARNING_WORKFLOW } from "./session/sectionConfig";
 import { downloadSessionArticle, resolveMediaUrl } from "./session/articleUtils";
 import ArticleDocumentPanel from "./session/ArticleDocumentPanel";
 
-const SOCKET_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+const SOCKET_URL = (import.meta.env.VITE_API_URL || "http://localhost:5000/api").replace(/\/api\/?$/, "");
 
 const SECTION_COLORS = {
   Titre: "#64748b", Abstract: "#8b5cf6", Introduction: "#22c55e",
