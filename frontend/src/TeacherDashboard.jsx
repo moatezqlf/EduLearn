@@ -153,6 +153,25 @@ export default function TeacherDashboard() {
   const [batchMsg,     setBatchMsg]     = useState("");
   const [batchBusy,    setBatchBusy]    = useState(false);
 
+  // Students tab — lazy-loaded groups by specialty
+  const [studentsData,    setStudentsData]    = useState(null);  // { groups, totalStudents, pendingCount }
+  const [studentsLoading, setStudentsLoading] = useState(false);
+  const [studentsError,   setStudentsError]   = useState("");
+  const [studentSearch,   setStudentSearch]   = useState("");
+
+  const fetchStudents = useCallback(async () => {
+    setStudentsLoading(true); setStudentsError("");
+    try {
+      const res = await api.sessions.getStudentGroupsBySpecialty();
+      setStudentsData(res);
+    } catch (e) { setStudentsError(e.message || "Impossible de charger les étudiants"); }
+    finally { setStudentsLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (activeNav === "students" && !studentsData && !studentsLoading) fetchStudents();
+  }, [activeNav, studentsData, studentsLoading, fetchStudents]);
+
   const fetchAll = useCallback(async () => {
     setLoading(true); setError("");
     try {
@@ -405,8 +424,166 @@ export default function TeacherDashboard() {
           </div>
         )}
 
+        {/* ── MY COURSES ── */}
+        {activeNav === "courses" && (
+          <div className="fade-up">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }} className="header-row">
+              <h1 style={{ fontSize: 22, fontWeight: 700, fontFamily: "'Syne',sans-serif", color: "#1A1D23" }}>
+                Mes cours <span style={{ fontSize: 14, fontWeight: 500, color: "#9CA3AF", marginLeft: 6 }}>({courses.length})</span>
+              </h1>
+              <button className="btn-primary" onClick={() => navigate("/teacher/courses/new")}>+ Nouveau cours</button>
+            </div>
+            {loading ? (
+              [0,1,2].map(i => <div key={i} className="skeleton" style={{ height: 90, borderRadius: 12, marginBottom: 10 }}/>)
+            ) : courses.length === 0 ? (
+              <div className="card" style={{ padding: 40, textAlign: "center" }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>📚</div>
+                <p style={{ fontSize: 14, color: "#9CA3AF", marginBottom: 16 }}>Vous n'avez pas encore créé de cours.</p>
+                <button className="btn-primary" onClick={() => navigate("/teacher/courses/new")}>Créer mon premier cours</button>
+              </div>
+            ) : (
+              <div className="courses-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 14 }}>
+                {courses.map((c, i) => {
+                  const color = colors[i % colors.length];
+                  const thumb = c.title.split(" ").slice(0,2).map(w => w[0]).join("").toUpperCase();
+                  return (
+                    <div key={c._id} className="card" style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12 }}>
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                        <div style={{ width: 48, height: 48, borderRadius: 12, background: color + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color, flexShrink: 0 }}>{thumb}</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                            <p style={{ fontWeight: 700, fontSize: 14, color: "#1A1D23" }}>{c.title}</p>
+                            <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5, background: c.published ? "#D1FAE5" : "#F3F4F6", color: c.published ? "#065F46" : "#6B7280" }}>
+                              {c.published ? "Publié" : "Brouillon"}
+                            </span>
+                          </div>
+                          {c.description && <p style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{c.description}</p>}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#6B7280", paddingTop: 8, borderTop: "1px solid #F3F4F6" }}>
+                        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ color: "#6C63FF" }}>⊕</span> <strong style={{ color: "#1A1D23" }}>{c.enrollments || 0}</strong> étudiants
+                        </span>
+                        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ color: "#0EA5E9" }}>◫</span> <strong style={{ color: "#1A1D23" }}>{c.modules?.length || 0}</strong> modules
+                        </span>
+                        {c.rating > 0 && (
+                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <span style={{ color: "#F59E0B" }}>★</span> <strong style={{ color: "#1A1D23" }}>{c.rating}</strong>
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button className="btn-primary" style={{ flex: 1, fontSize: 12 }} onClick={() => navigate(`/teacher/courses/${c._id}`)}>
+                          Gérer
+                        </button>
+                        <button className="btn-sm" onClick={() => navigate(`/teacher/assignments/new/${c._id}`)}>+ Devoir</button>
+                        <button className="btn-sm" onClick={() => navigate(`/teacher/courses/${c._id}`)}>Ressources</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── STUDENTS ── */}
+        {activeNav === "students" && (
+          <div className="fade-up">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 12 }} className="header-row">
+              <div>
+                <h1 style={{ fontSize: 22, fontWeight: 700, fontFamily: "'Syne',sans-serif", color: "#1A1D23" }}>
+                  Mes étudiants
+                </h1>
+                {studentsData && (
+                  <p style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>
+                    <strong style={{ color: "#1A1D23" }}>{studentsData.totalStudents || 0}</strong> étudiants inscrits à vos cours
+                    {studentsData.pendingCount > 0 && (
+                      <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 5, background: "#FFF3CD", color: "#92600A" }}>
+                        {studentsData.pendingCount} en attente d'activation
+                      </span>
+                    )}
+                  </p>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <input
+                  className="input-field"
+                  style={{ width: 220, padding: "7px 12px", fontSize: 13 }}
+                  placeholder="Rechercher un étudiant…"
+                  value={studentSearch}
+                  onChange={e => setStudentSearch(e.target.value)}
+                />
+                <button className="btn-sm" onClick={fetchStudents} disabled={studentsLoading}>↻ Actualiser</button>
+              </div>
+            </div>
+
+            {studentsError && <div className="error-banner" style={{ marginBottom: 16 }}>⚠ {studentsError}</div>}
+
+            {studentsLoading ? (
+              [0,1,2].map(i => <div key={i} className="skeleton" style={{ height: 70, borderRadius: 10, marginBottom: 8 }}/>)
+            ) : !studentsData || studentsData.groups?.length === 0 ? (
+              <div className="card" style={{ padding: 40, textAlign: "center" }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>👥</div>
+                <p style={{ fontSize: 14, color: "#9CA3AF", marginBottom: 8 }}>Aucun étudiant inscrit à vos cours pour le moment.</p>
+                <p style={{ fontSize: 12, color: "#C0C4CC" }}>Créez un cours et partagez-le avec vos étudiants.</p>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                {(studentsData.groups || []).map((group) => {
+                  const filteredStudents = (group.students || []).filter(s =>
+                    !studentSearch || s.name?.toLowerCase().includes(studentSearch.toLowerCase()) ||
+                    s.email?.toLowerCase().includes(studentSearch.toLowerCase())
+                  );
+                  if (filteredStudents.length === 0) return null;
+                  return (
+                    <div key={group.specialite} className="card" style={{ overflow: "hidden" }}>
+                      {/* Group header */}
+                      <div style={{ padding: "14px 18px", background: "#FAFAFA", borderBottom: "1px solid #F3F4F6", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#6C63FF" }}/>
+                          <span style={{ fontWeight: 700, fontSize: 14, color: "#1A1D23" }}>{group.specialite}</span>
+                        </div>
+                        <div style={{ display: "flex", gap: 14, fontSize: 12, color: "#6B7280" }}>
+                          <span><strong style={{ color: "#1A1D23" }}>{group.activeCount}</strong> actifs</span>
+                          <span><strong style={{ color: "#1A1D23" }}>{group.count}</strong> total</span>
+                        </div>
+                      </div>
+                      {/* Students table */}
+                      <div>
+                        {filteredStudents.map((s, idx) => (
+                          <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 18px", borderBottom: idx < filteredStudents.length - 1 ? "1px solid #F3F4F6" : "none", background: idx % 2 === 0 ? "#fff" : "#FAFBFC" }}>
+                            <div className="avatar" style={{ background: avColor(s.name), width: 34, height: 34, fontSize: 12 }}>
+                              {(s.name || "?").split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase()}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontWeight: 600, fontSize: 13, color: "#1A1D23", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {s.name}
+                              </div>
+                              <div style={{ fontSize: 11, color: "#9CA3AF", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.email}</div>
+                            </div>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+                              <span style={{ fontSize: 11, color: "#6B7280", background: "#F3F4F6", padding: "2px 8px", borderRadius: 5, whiteSpace: "nowrap" }}>
+                                {s.specialite}
+                              </span>
+                              <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5, background: s.pending ? "#FFF3CD" : "#D1FAE5", color: s.pending ? "#92600A" : "#065F46" }}>
+                                {s.pending ? "En attente" : "Actif"}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── MAIN DASHBOARD ── */}
-        {activeNav !== "profile" && activeNav !== "history" && (
+        {activeNav !== "profile" && activeNav !== "history" && activeNav !== "courses" && activeNav !== "students" && (
           <>
             {/* Stats */}
             <div style={{ display: "flex", gap: 14, marginBottom: 28 }} className="fade-up">
