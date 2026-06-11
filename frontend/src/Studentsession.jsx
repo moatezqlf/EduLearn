@@ -122,6 +122,7 @@ function WorkflowBar({ currentStep }) {
 export default function StudentSession() {
   const socketRef = useRef(null);
   const joinedRef = useRef(false);
+  const preReadRef = useRef(false); // article read during waiting phase → skip read step on writing start
   const location = useLocation();
   const { user } = useAuth();
 
@@ -358,9 +359,17 @@ export default function StudentSession() {
       if (p === "writing") {
         setSubmitted(false);
         setAnswer("");
-        setArticleRead(false);
-        setStudentLearnStep("read");
         autoSubmittedRef.current = false;
+        if (preReadRef.current) {
+          // Student already read the article during waiting phase → jump straight to writing
+          setArticleRead(true);
+          setStudentLearnStep("write");
+          setActiveWritingTab(2);
+          preReadRef.current = false;
+        } else {
+          setArticleRead(false);
+          setStudentLearnStep("read");
+        }
         // Start local reading countdown if configured
         const sk = data?.currentSectionKey || data?.missingSection || "";
         const timings = data?.sectionTimings || {};
@@ -607,7 +616,7 @@ export default function StudentSession() {
           {hasDocument && articleFileUrl ? (
             <>
               <div style={styles.readingPreBanner}>
-                📖 <strong>Profitez de ce temps</strong> pour lire attentivement l'article complet ci-dessous. Vous devrez compléter une section une fois la session lancée.
+                📖 <strong>Profitez de ce temps</strong> pour lire attentivement l'article complet ci-dessous. Cliquez <em>J'ai lu</em> quand vous avez terminé — vous passerez directement à la rédaction dès le lancement.
               </div>
               <ArticleDocumentPanel
                 question={question}
@@ -619,7 +628,12 @@ export default function StudentSession() {
                 missingSection={missingSection}
                 resourceType={sessionResourceType}
                 mode="complete"
-                hideContinue
+                onContinue={() => {
+                  preReadRef.current = true;
+                  setArticleRead(true);
+                }}
+                continueLabel={articleRead ? "✓ Article lu — En attente du lancement…" : "J'ai lu l'article — Prêt(e) à rédiger →"}
+                hideContinue={articleRead}
               />
             </>
           ) : (

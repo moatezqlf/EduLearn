@@ -11,7 +11,7 @@ import SessionProgressPanel from "./session/SessionProgressPanel";
 import { LEARNING_WORKFLOW } from "./session/sectionConfig";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
-const SOCKET_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+const SOCKET_URL = (import.meta.env.VITE_API_URL || "http://localhost:5000/api").replace(/\/api\/?$/, "");
 
 // ─── Document type / IMRAD config data ───────────────────
 const DOCUMENT_TYPES = [

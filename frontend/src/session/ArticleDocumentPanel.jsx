@@ -71,6 +71,17 @@ export default function ArticleDocumentPanel({
               </a>
             </div>
           </div>
+
+          {/* Continue button ABOVE the PDF so it's always visible without scrolling */}
+          {!hideContinue && (
+            <button type="button" style={st.continueBtnTop} onClick={onContinue}>
+              {continueLabel || (isComplete
+                ? `J'ai lu — Passer à l'exercice →`
+                : `J'ai lu — Passer à la rédaction →`
+              )}
+            </button>
+          )}
+
           {isPdf && <iframe title="Aperçu PDF" src={fileUrl} style={st.pdfFrame} />}
         </>
       )}
@@ -146,5 +157,11 @@ const st = {
     width: "100%", padding: "16px 0", background: "#6366f1", color: "#fff", border: "none",
     borderRadius: 12, fontWeight: 700, fontSize: 15, cursor: "pointer",
     boxShadow: "0 4px 14px rgba(99,102,241,0.35)", letterSpacing: "0.01em",
+  },
+  continueBtnTop: {
+    display: "block", width: "100%", padding: "13px 0", marginBottom: 14,
+    background: "#22c55e", color: "#fff", border: "none",
+    borderRadius: 12, fontWeight: 700, fontSize: 14, cursor: "pointer",
+    boxShadow: "0 3px 10px rgba(34,197,94,0.30)", letterSpacing: "0.01em",
   },
 };
