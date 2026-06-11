@@ -169,6 +169,15 @@ const sessionSchema = new mongoose.Schema({
   phaseStartedAt: { type: Date, default: null },
   phaseEndsAt:    { type: Date, default: null },
 
+  // ── Actual timer durations per section/phase (logged on phase end) ──
+  sectionTimerLog: [{
+    sectionKey:      { type: String },
+    phase:           { type: String },   // "writing" | "review"
+    startedAt:       { type: Date },
+    endedAt:         { type: Date },
+    durationSeconds: { type: Number },
+  }],
+
   // ── Section-by-section flow state ──
   // currentSectionKey is the active section being written/reviewed/evaluated.
   currentSectionIndex: { type: Number, default: 0 },
@@ -222,6 +231,9 @@ const sessionSubmissionSchema = new mongoose.Schema({
   aiScore:        Number,
   // Flexible object: rubricMapping, lineCorrections, feedForward, criteriaScores, etc.
   aiFeedback: { type: mongoose.Schema.Types.Mixed, default: {} },
+  // Per-section AI scores — indexed by sectionKey for fast cross-section queries
+  // { "Introduction": { score: 15, feedback: {...}, submittedAt: Date },  "Méthodes": {...} }
+  sectionScores: { type: mongoose.Schema.Types.Mixed, default: {} },
   peerReviews: [peerReviewSchema],
   revisions:   [revisionSchema],
   submittedAt: { type: Date, default: Date.now },

@@ -7,6 +7,7 @@ import SpecialtyGroupsPanel from "./session/SpecialtyGroupsPanel";
 import ArticleUploadModal from "./session/ArticleUploadModal";
 import SectionLearnModal from "./session/SectionLearnModal";
 import ArticleCutterTool from "./session/ArticleCutterTool";
+import SessionProgressPanel from "./session/SessionProgressPanel";
 import { LEARNING_WORKFLOW } from "./session/sectionConfig";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
@@ -869,19 +870,13 @@ export default function TeacherSession() {
 
           {activeTab === "analytics" && (
             <div style={styles.card}>
-              <h2 style={styles.cardTitle}>Class Overview</h2>
-              {answers.length === 0 ? (
-                <div style={styles.emptyState}>No answers yet.</div>
+              {sessionId ? (
+                <SessionProgressPanel
+                  sessionId={sessionId}
+                  selectedSections={selectedSections}
+                />
               ) : (
-                answers.map(a => (
-                  <div key={a.studentId} style={styles.answerCard}>
-                    <div style={styles.answerHeader}>
-                      <span style={styles.answerName}>{a.studentName}</span>
-                      {a.aiScore && <span style={styles.aiScore}>AI: {a.aiScore}/20</span>}
-                    </div>
-                    <p style={styles.answerPreview}>{a.content?.slice(0, 120)}...</p>
-                  </div>
-                ))
+                <div style={styles.emptyState}>Lancez la session pour accéder aux analytics.</div>
               )}
             </div>
           )}

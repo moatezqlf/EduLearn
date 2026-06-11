@@ -419,6 +419,26 @@ function registerSessionEvents(io) {
       const room = `session:${sid}`;
       console.log(`advance_phase: room=${room}, phase=${phase}`);
 
+      // Snapshot current state before any changes (for timer logging)
+      const sessionSnapshot = await Session.findById(sid).lean();
+
+      // Log actual duration of the phase that's ending
+      if ((sessionSnapshot?.phase === "writing" || sessionSnapshot?.phase === "review") && sessionSnapshot?.phaseStartedAt) {
+        const endedAt = new Date();
+        const durationSeconds = Math.round((endedAt - new Date(sessionSnapshot.phaseStartedAt)) / 1000);
+        await Session.findByIdAndUpdate(sid, {
+          $push: {
+            sectionTimerLog: {
+              sectionKey: sessionSnapshot.currentSectionKey || sessionSnapshot.selectedSections?.[0] || "",
+              phase: sessionSnapshot.phase,
+              startedAt: sessionSnapshot.phaseStartedAt,
+              endedAt,
+              durationSeconds,
+            },
+          },
+        });
+      }
+
       // Clear any existing auto-advance timer for this session
       if (phaseTimers.has(sid)) {
         clearTimeout(phaseTimers.get(sid));
@@ -442,6 +462,18 @@ function registerSessionEvents(io) {
             phaseTimers.delete(sid);
             const stillIn = await Session.findById(sid);
             if (stillIn?.phase !== phase) return;
+            // Log the timer that just expired
+            await Session.findByIdAndUpdate(sid, {
+              $push: {
+                sectionTimerLog: {
+                  sectionKey: stillIn.currentSectionKey || stillIn.selectedSections?.[0] || "",
+                  phase,
+                  startedAt: stillIn.phaseStartedAt,
+                  endedAt: new Date(),
+                  durationSeconds: minutes * 60,
+                },
+              },
+            });
             await Session.findByIdAndUpdate(sid, { phase: nextPhase, phaseStartedAt: null, phaseEndsAt: null });
             const afterNext = await Session.findById(sid);
             const nextPayload = {
@@ -735,13 +767,24 @@ function registerSessionEvents(io) {
         const rawText = await callAiModel(prompt);
         const parsed = normalizeAiFeedback(rawText);
 
+        const scoreVal = Number.isFinite(Number(parsed?.score)) ? Number(parsed.score) : null;
         await SessionSubmission.findOneAndUpdate(
           { sessionId: sid, studentId: rid, round },
-          { aiFeedback: parsed, aiScore: parsed.score },
+          {
+            $set: {
+              aiFeedback: parsed,
+              aiScore: scoreVal,
+              [`sectionScores.${sectionKey}`]: {
+                score: scoreVal,
+                feedback: parsed,
+                submittedAt: new Date(),
+              },
+            },
+          },
           { upsert: true }
         );
 
-        socket.emit("ai_feedback", { feedback: parsed, score: parsed.score });
+        socket.emit("ai_feedback", { feedback: parsed, score: scoreVal });
         console.log("AI feedback sent, score:", parsed.score);
 
         const allAnswers = await SessionSubmission.find({ sessionId: sid });
@@ -1248,23 +1291,33 @@ async function runSectionAiEvaluation(io, sessionId) {
       const rawText = await callAiModel(prompt);
       const parsed = normalizeAiFeedback(rawText);
 
+      const scoreVal = Number.isFinite(Number(parsed?.score)) ? Number(parsed.score) : null;
       await SessionSubmission.findOneAndUpdate(
         { sessionId, studentId: sub.studentId, round },
         {
-          aiFeedback: parsed,
-          aiScore: Number.isFinite(Number(parsed?.score)) ? Number(parsed.score) : null,
+          $set: {
+            aiFeedback: parsed,
+            aiScore: scoreVal,
+            [`sectionScores.${sectionKey}`]: {
+              score: scoreVal,
+              feedback: parsed,
+              submittedAt: new Date(),
+            },
+          },
         }
       );
     } catch (err) {
       await SessionSubmission.findOneAndUpdate(
         { sessionId, studentId: sub.studentId, round },
         {
-          aiFeedback: {
-            basic: "AI evaluation failed for this answer.",
-            error: err?.message || "Unknown error",
-            sectionKey,
+          $set: {
+            aiFeedback: {
+              basic: "AI evaluation failed for this answer.",
+              error: err?.message || "Unknown error",
+              sectionKey,
+            },
+            aiScore: null,
           },
-          aiScore: null,
         }
       );
     } finally {

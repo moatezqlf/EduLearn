@@ -771,6 +771,179 @@ router.get("/sessions/active", auth, async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
+// ── Section-level progress for teacher dashboard ─────────────────────────────
+router.get("/sessions/:sessionId/section-progress", auth, async (req, res) => {
+  try {
+    const session = await Session.findById(req.params.sessionId).lean();
+    if (!session) return res.status(404).json({ message: "Session not found" });
+
+    const userId = String(req.user.id);
+    if (req.user.role !== "admin") {
+      const isTeacher = String(session.createdBy) === userId;
+      const isStudent = (session.students || []).some(s =>
+        String(s.userId || s.id || "").startsWith(userId)
+      );
+      if (!isTeacher && !isStudent) return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const selectedSections = session.selectedSections || [];
+    const submissions = await SessionSubmission.find({ sessionId: req.params.sessionId })
+      .select("studentId studentName round sectionKey sectionAnswers sectionScores aiScore aiFeedback peerReviews submittedAt")
+      .lean();
+
+    // Build per-student aggregated data
+    const studentMap = new Map();
+    for (const sub of submissions) {
+      const key = String(sub.studentId);
+      if (!studentMap.has(key)) {
+        studentMap.set(key, {
+          studentId: sub.studentId,
+          studentName: sub.studentName,
+          sectionScores: {},
+          submissions: [],
+          lastActivityAt: null,
+        });
+      }
+      const entry = studentMap.get(key);
+      entry.submissions.push(sub);
+
+      const subAt = sub.submittedAt ? new Date(sub.submittedAt) : null;
+      if (subAt && (!entry.lastActivityAt || subAt > entry.lastActivityAt)) {
+        entry.lastActivityAt = subAt;
+      }
+
+      // Merge sectionScores from the document field
+      if (sub.sectionScores && typeof sub.sectionScores === "object") {
+        for (const [sk, sv] of Object.entries(sub.sectionScores)) {
+          const existing = entry.sectionScores[sk];
+          const svAt = sv?.submittedAt ? new Date(sv.submittedAt) : new Date(0);
+          const existAt = existing?.submittedAt ? new Date(existing.submittedAt) : new Date(0);
+          if (!existing || svAt > existAt) entry.sectionScores[sk] = sv;
+        }
+      }
+
+      // Fallback: derive from aiScore + sectionKey when sectionScores not yet written
+      if (sub.sectionKey && Number.isFinite(Number(sub.aiScore)) && !entry.sectionScores[sub.sectionKey]) {
+        entry.sectionScores[sub.sectionKey] = {
+          score: Number(sub.aiScore),
+          submittedAt: sub.submittedAt,
+        };
+      }
+    }
+
+    // Build student list with completed sections
+    const students = [];
+    for (const [, entry] of studentMap) {
+      const completedSections = selectedSections.filter(sk =>
+        entry.submissions.some(sub => {
+          const sa = sub.sectionAnswers || {};
+          return (sa[sk] && String(sa[sk]).trim()) ||
+            (sub.sectionKey === sk && String(sub.content || "").trim());
+        })
+      );
+
+      // Last section = most recently submitted sectionKey
+      const lastSub = [...entry.submissions]
+        .filter(s => s.sectionKey)
+        .sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0))[0];
+      const lastSectionKey = lastSub?.sectionKey || completedSections.at(-1) || "";
+
+      // Peer review average per section
+      const peerAverages = {};
+      for (const sub of entry.submissions) {
+        const sk = sub.sectionKey || "";
+        if (!sk) continue;
+        const scores = (sub.peerReviews || []).flatMap(pr => {
+          const r = pr.ratings || {};
+          return ["clarity", "structure", "argumentation", "scientific"]
+            .map(k => Number(r[k] || 0))
+            .filter(Boolean);
+        });
+        if (scores.length) peerAverages[sk] = Number((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2));
+      }
+
+      students.push({
+        studentId: entry.studentId,
+        studentName: entry.studentName,
+        sectionScores: entry.sectionScores,
+        peerAverages,
+        completedSections,
+        lastSectionKey,
+        lastActivityAt: entry.lastActivityAt,
+      });
+    }
+
+    // Build group progress
+    const groupProgress = (session.groups || []).map((group, idx) => {
+      const memberData = (group.members || []).map(m => {
+        const mId = String(m.userId || m.id || "");
+        const studData = students.find(s => {
+          const sId = String(s.studentId || "");
+          return sId === mId || sId.startsWith(mId + "::") || mId.startsWith(sId + "::");
+        });
+        return {
+          id: m.id,
+          name: m.name,
+          isReceiver: m.isReceiver,
+          completedSections: studData?.completedSections || [],
+          lastSectionKey: studData?.lastSectionKey || "",
+          sectionScores: studData?.sectionScores || {},
+        };
+      });
+
+      const sectionsAllDone = selectedSections.filter(sk =>
+        memberData.length > 0 && memberData.every(m => m.completedSections.includes(sk))
+      );
+      const lastActivities = memberData
+        .map(m => students.find(s => s.studentName === m.name)?.lastActivityAt)
+        .filter(Boolean)
+        .sort((a, b) => new Date(b) - new Date(a));
+
+      return {
+        groupIndex: idx,
+        members: memberData.map(({ id, name, isReceiver }) => ({ id, name, isReceiver })),
+        sectionsCompleted: sectionsAllDone,
+        currentSectionKey: session.currentSectionKey || "",
+        lastActivityAt: lastActivities[0] || null,
+      };
+    });
+
+    // Section-level stats
+    const sectionStats = {};
+    for (const sk of selectedSections) {
+      const scores = students
+        .map(s => s.sectionScores[sk]?.score)
+        .filter(v => Number.isFinite(Number(v)))
+        .map(Number);
+      const submitted = students.filter(s => s.completedSections.includes(sk)).length;
+      sectionStats[sk] = {
+        avgScore: scores.length ? Number((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1)) : null,
+        maxScore: scores.length ? Math.max(...scores) : null,
+        minScore: scores.length ? Math.min(...scores) : null,
+        submitted,
+        total: students.length,
+        completionRate: students.length > 0 ? Number((submitted / students.length).toFixed(2)) : 0,
+      };
+    }
+
+    res.json({
+      sessionId: session._id,
+      code: session.code,
+      phase: session.phase,
+      currentSectionKey: session.currentSectionKey || "",
+      currentSectionIndex: session.currentSectionIndex || 0,
+      selectedSections,
+      configuredTimings: session.sectionTimings || {},
+      timings: session.sectionTimerLog || [],
+      students,
+      groups: groupProgress,
+      sectionStats,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 router.get("/sessions/history", auth, async (req, res) => {
   try {
     const role = req.user.role;
