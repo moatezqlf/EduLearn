@@ -13,13 +13,6 @@ const fmt = (iso) => {
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 };
 
-const statusCfg = {
-  pending:     { label: "Pending",     bg: "#FFF3CD", color: "#92600A", dot: "#F59E0B" },
-  ai_reviewed: { label: "AI Reviewed", bg: "#EEF2FF", color: "#3730A3", dot: "#6C63FF" },
-  graded:      { label: "Graded",      bg: "#D1FAE5", color: "#065F46", dot: "#10B981" },
-  returned:    { label: "Returned",    bg: "#FEE2E2", color: "#DC2626", dot: "#EF4444" },
-};
-
 const navItems = [
   { id: "dashboard",     key: "nav_dashboard",     icon: "⊞" },
   { id: "courses",       key: "nav_courses",        icon: "◫" },
@@ -133,10 +126,7 @@ export default function TeacherDashboard() {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-  const [activeTab,    setActiveTab]    = useState("all");
-  const [selected,     setSelected]     = useState(null);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [grading,      setGrading]      = useState(null);
 
   // Profile edit state
   const [editName,     setEditName]     = useState(user?.name || "");
@@ -150,8 +140,6 @@ export default function TeacherDashboard() {
   const [analytics,    setAnalytics]    = useState(null);
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState("");
-  const [batchMsg,     setBatchMsg]     = useState("");
-  const [batchBusy,    setBatchBusy]    = useState(false);
 
   // Students tab — lazy-loaded groups by specialty
   const [studentsData,    setStudentsData]    = useState(null);  // { groups, totalStudents, pendingCount }
@@ -210,27 +198,7 @@ export default function TeacherDashboard() {
     };
   }, []);
 
-  const filtered  = activeTab === "all" ? submissions : submissions.filter(s => s.status === activeTab);
   const pending   = submissions.filter(s => s.status === "pending").length;
-
-  const handleGrade = async (subId, score, note) => {
-    try {
-      await api.submissions.grade(subId, score, note);
-      setSubmissions(prev => prev.map(s => s._id === subId ? { ...s, score, teacherNote: note, status: "graded" } : s));
-      setGrading(null); setSelected(null);
-    } catch (e) { alert(e.message); }
-  };
-
-  const handleGenerateAI = async (subId) => {
-    setBatchBusy(true); setBatchMsg("");
-    try {
-      await api.aiFeedback.generate(subId);
-      setBatchMsg("✓ AI feedback generated!");
-      setSubmissions(prev => prev.map(s => s._id === subId ? { ...s, status: "ai_reviewed" } : s));
-      if (selected?._id === subId) setSelected(s => ({ ...s, status: "ai_reviewed" }));
-    } catch (e) { setBatchMsg("Error: " + e.message); }
-    finally { setBatchBusy(false); }
-  };
 
   const saveProfile = async () => {
     setSavingProfile(true); setProfileMsg("");
@@ -311,7 +279,7 @@ export default function TeacherDashboard() {
             <button className="btn-sm" onClick={() => setSidebarOpen(v => !v)} style={{ padding: "8px 12px" }}>☰</button>
             <button className="btn-sm" onClick={fetchAll} style={{ padding: "8px 12px" }}>↻</button>
 
-            {/* + New dropdown */}
+            + New dropdown
             <div className="dropdown" onClick={e => e.stopPropagation()}>
               <button className="btn-primary" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}
                 onClick={() => setShowDropdown(v => !v)}>
@@ -605,81 +573,6 @@ export default function TeacherDashboard() {
             {/* Grid */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 24 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-
-                {/* Submissions table */}
-                <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-                  <div style={{ padding: "16px 20px", borderBottom: "1px solid #F3F4F6", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-                    <span className="section-title">Submissions</span>
-                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                      {[["all","All"],["pending","Pending"],["ai_reviewed","AI Reviewed"],["graded","Graded"]].map(([v,l]) => (
-                        <button key={v} className={`tab ${activeTab===v?"active":""}`} onClick={() => setActiveTab(v)} style={{ fontSize: 11, padding: "5px 11px" }}>{l}</button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="sub-row" style={{ background: "#FAFAFA", fontWeight: 600, color: "#9CA3AF", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid #EAECF0", cursor: "default" }}>
-                    <span/><span>Student</span><span>Assignment</span><span>Submitted</span><span>Status</span><span></span>
-                  </div>
-                  {loading ? [0,1,2,3].map(i => <div key={i} className="skeleton" style={{ height: 44, margin: "4px 16px", borderRadius: 8 }}/>) :
-                   filtered.length === 0 ? <p style={{ padding: 24, textAlign: "center", fontSize: 13, color: "#9CA3AF" }}>No submissions yet.</p> :
-                   filtered.map(s => {
-                    const sc = statusCfg[s.status] || statusCfg.pending;
-                    const initials = (s.student?.name || "?").split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase();
-                    return (
-                      <div key={s._id} className="sub-row" onClick={() => setSelected(selected?._id === s._id ? null : s)} style={{ background: selected?._id === s._id ? "#F5F3FF" : undefined }}>
-                        <div className="avatar" style={{ background: avColor(s.student?.name) }}>{initials}</div>
-                        <span style={{ fontWeight: 500, color: "#1A1D23", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.student?.name || "Student"}</span>
-                        <span style={{ color: "#4B5563", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.assignment?.title || "Assignment"}</span>
-                        <span style={{ color: "#9CA3AF" }}>{fmt(s.submittedAt)}</span>
-                        <span className="badge" style={{ background: sc.bg, color: sc.color }}><span style={{ width: 5, height: 5, borderRadius: "50%", background: sc.dot }}/>{sc.label}</span>
-                        <button className="btn-sm" onClick={e => { e.stopPropagation(); navigate(`/teacher/submissions/${s._id}`); }}>
-                          {s.status === "pending" ? "Grade" : "View"}
-                        </button>
-                      </div>
-                    );
-                  })}
-
-                  {/* Expanded panel */}
-                  {selected && (
-                    <div style={{ margin: "0 16px 16px", background: "#F5F3FF", border: "1px solid #C7D2FB", borderRadius: 12, padding: 16 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                        <div>
-                          <p style={{ fontWeight: 700, fontSize: 14, color: "#1A1D23" }}>{selected.assignment?.title || "Assignment"}</p>
-                          <p style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>by {selected.student?.name} · {fmt(selected.submittedAt)}</p>
-                        </div>
-                        {selected.score != null && (
-                          <div style={{ background: "#fff", border: "1px solid #C7D2FB", borderRadius: 10, padding: "8px 16px", textAlign: "center" }}>
-                            <p style={{ fontSize: 22, fontWeight: 700, color: "#4F46E5", fontFamily: "'Syne',sans-serif" }}>{selected.score}</p>
-                            <p style={{ fontSize: 10, color: "#9CA3AF" }}>/100</p>
-                          </div>
-                        )}
-                      </div>
-                      {selected.content && (
-                        <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "#4B5563", lineHeight: 1.6, maxHeight: 100, overflowY: "auto", marginBottom: 12, whiteSpace: "pre-wrap" }}>{selected.content}</div>
-                      )}
-                      {grading?.id === selected._id ? (
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                          <input type="number" min={0} max={100} placeholder="Score /100" value={grading.score}
-                            onChange={e => setGrading(g => ({ ...g, score: e.target.value }))}
-                            style={{ width: 100, padding: "6px 10px", border: "1px solid #C7D2FB", borderRadius: 7, fontSize: 13, fontFamily: "inherit", outline: "none" }}/>
-                          <input type="text" placeholder="Comment (optional)" value={grading.note}
-                            onChange={e => setGrading(g => ({ ...g, note: e.target.value }))}
-                            style={{ flex: 1, padding: "6px 10px", border: "1px solid #C7D2FB", borderRadius: 7, fontSize: 13, fontFamily: "inherit", outline: "none" }}/>
-                          <button className="btn-primary" style={{ fontSize: 12 }} onClick={() => handleGrade(selected._id, Number(grading.score), grading.note)}>Save</button>
-                          <button className="btn-sm" onClick={() => setGrading(null)}>Cancel</button>
-                        </div>
-                      ) : (
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                          <button className="btn-ai" style={{ flex: 1 }} onClick={() => handleGenerateAI(selected._id)} disabled={batchBusy}>
-                            {batchBusy ? "Processing…" : "◈ Generate AI Feedback"}
-                          </button>
-                          <button className="btn-primary" style={{ flex: 1 }} onClick={() => setGrading({ id: selected._id, score: "", note: "" })}>✎ Grade Manually</button>
-                          <button className="btn-sm" onClick={() => navigate(`/teacher/submissions/${selected._id}`)}>Full View</button>
-                        </div>
-                      )}
-                      {batchMsg && <p style={{ fontSize: 12, color: batchMsg.startsWith("✓") ? "#10B981" : "#DC2626", marginTop: 8 }}>{batchMsg}</p>}
-                    </div>
-                  )}
-                </div>
 
                 {/* My Courses — only this teacher's */}
                 <section>
