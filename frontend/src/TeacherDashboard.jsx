@@ -14,12 +14,13 @@ const fmt = (iso) => {
 };
 
 const navItems = [
-  { id: "dashboard",     key: "nav_dashboard",     icon: "⊞" },
-  { id: "courses",       key: "nav_courses",        icon: "◫" },
-  { id: "students",      key: "nav_students",       icon: "⊕" },
-  { id: "history",       key: "nav_history",        icon: "◉" },
-  { id: "communication", key: "nav_communication",  icon: "💬", route: "/teacher/communication" },
-  { id: "profile",       key: "nav_profile",        icon: "⊙" },
+  { id: "dashboard",     key: "nav_dashboard",       icon: "⊞" },
+  { id: "courses",       key: "nav_courses",          icon: "◫" },
+  { id: "peer",          key: "launch_peer_session",  icon: "◈", route: "/teacher/peer" },
+  { id: "students",      key: "nav_students",         icon: "⊕" },
+  { id: "history",       key: "nav_history",          icon: "◉" },
+  { id: "communication", key: "nav_communication",    icon: "💬", route: "/teacher/communication" },
+  { id: "profile",       key: "nav_profile",          icon: "⊙" },
 ];
 
 const css = `
@@ -266,17 +267,6 @@ export default function TeacherDashboard() {
             );
           })}
         </nav>
-
-        {/* Peer session CTA */}
-        <div style={{ margin: "12px 6px 8px" }}>
-          <button
-            onClick={() => navigate("/teacher/peer")}
-            style={{ width: "100%", padding: sidebarOpen ? "10px 14px" : "10px 0", background: "#6C63FF", color: "#fff", border: "none", borderRadius: 10, fontWeight: 600, fontSize: sidebarOpen ? 13 : 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: sidebarOpen ? "flex-start" : "center", gap: 8, transition: "all .2s" }}
-          >
-            <span>◈</span>
-            {sidebarOpen && t("launch_peer_session")}
-          </button>
-        </div>
 
         <div style={{ borderTop: "1px solid #F3F4F6", paddingTop: 14, display: "flex", alignItems: "center", gap: 10, padding: "14px 6px 0" }}>
           <div style={{ width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg,#10B981,#0EA5E9)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
