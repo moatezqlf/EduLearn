@@ -104,7 +104,6 @@ export default function TeacherDashboard() {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-  const [showDropdown, setShowDropdown] = useState(false);
 
   // Profile edit state
   const [editName,     setEditName]     = useState(user?.name || "");
@@ -166,13 +165,9 @@ export default function TeacherDashboard() {
     const style = document.createElement("style");
     style.textContent = css;
     document.head.appendChild(style);
-    // Close dropdown on outside click
-    const close = () => setShowDropdown(false);
-    document.addEventListener("click", close);
     return () => {
       document.head.removeChild(link);
       document.head.removeChild(style);
-      document.removeEventListener("click", close);
     };
   }, []);
 
@@ -312,39 +307,6 @@ export default function TeacherDashboard() {
             <LangToggle />
             <button className="btn-sm" onClick={() => setSidebarOpen(v => !v)} style={{ padding: "8px 12px" }}>☰</button>
             <button className="btn-sm" onClick={fetchAll} style={{ padding: "8px 12px" }}>↻</button>
-
-            
-            <div className="dropdown" onClick={e => e.stopPropagation()}>
-              <button className="btn-primary" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}
-                onClick={() => setShowDropdown(v => !v)}>
-                + {t("btn_new")} ▾
-              </button>
-              {showDropdown && (
-                <div className="dropdown-menu">
-                  <div className="dropdown-item" onClick={() => { setShowDropdown(false); navigate("/teacher/courses/new"); }}>
-                    <span style={{ fontSize: 16 }}>◫</span>
-                    <div>
-                      <p style={{ fontWeight: 600, fontSize: 13 }}>{t("new_course")}</p>
-                      <p style={{ fontSize: 11, color: "#9CA3AF" }}>Create a full course with modules</p>
-                    </div>
-                  </div>
-                  <div className="dropdown-item" onClick={() => { setShowDropdown(false); navigate("/teacher/assignments/new"); }}>
-                    <span style={{ fontSize: 16 }}>✎</span>
-                    <div>
-                      <p style={{ fontWeight: 600, fontSize: 13 }}>New Assignment</p>
-                      <p style={{ fontSize: 11, color: "#9CA3AF" }}>Add a task with rubric & AI feedback</p>
-                    </div>
-                  </div>
-                  <div className="dropdown-item" onClick={() => { setShowDropdown(false); navigate("/teacher/peer"); }}>
-                    <span style={{ fontSize: 16 }}>◈</span>
-                    <div>
-                      <p style={{ fontWeight: 600, fontSize: 13 }}>Peer Session</p>
-                      <p style={{ fontSize: 11, color: "#9CA3AF" }}>Launch AI-powered peer feedback</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
         </div>
 
@@ -604,49 +566,6 @@ export default function TeacherDashboard() {
               ))}
             </div>
 
-            {/* Courses list */}
-            <section>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                <span className="section-title">{t("my_courses")} ({courses.length})</span>
-                <button className="btn-primary" style={{ fontSize: 12, padding: "6px 14px" }} onClick={() => navigate("/teacher/courses/new")}>+ {t("new_course")}</button>
-              </div>
-              {loading ? [0,1].map(i => <div key={i} className="skeleton" style={{ height: 80, borderRadius: 10, marginBottom: 8 }}/>) :
-               courses.length === 0 ? (
-                <div className="card" style={{ padding: 24, textAlign: "center" }}>
-                  <p style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 12 }}>{t("no_courses_teacher")}</p>
-                  <button className="btn-primary" onClick={() => navigate("/teacher/courses/new")}>{t("create_first_course")}</button>
-                </div>
-               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {courses.map((c, i) => {
-                    const color = colors[i % colors.length];
-                    const thumb = c.title.split(" ").slice(0,2).map(w => w[0]).join("").toUpperCase();
-                    return (
-                      <div className="course-row" key={c._id}>
-                        <div style={{ width: 42, height: 42, borderRadius: 10, background: color+"18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color, flexShrink: 0 }}>{thumb}</div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                            <p style={{ fontWeight: 600, fontSize: 13, color: "#1A1D23", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</p>
-                            <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5, background: c.published ? "#D1FAE5" : "#F3F4F6", color: c.published ? "#065F46" : "#6B7280", flexShrink: 0 }}>
-                              {c.published ? t("published") : t("draft")}
-                            </span>
-                          </div>
-                          <div style={{ display: "flex", gap: 14, fontSize: 11, color: "#9CA3AF" }}>
-                            <span>⊕ {c.enrollments || 0} {t("nav_students").toLowerCase()}</span>
-                            <span>◫ {c.modules?.length || 0} modules</span>
-                            {c.rating > 0 && <span>★ {c.rating}</span>}
-                          </div>
-                        </div>
-                        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                          <button className="btn-sm" onClick={e => { e.stopPropagation(); navigate(`/teacher/courses/${c._id}`); }}>{t("manage")}</button>
-                          <button className="btn-sm" onClick={e => { e.stopPropagation(); navigate(`/teacher/assignments/new/${c._id}`); }}>+ {t("new_assignment")}</button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-               )}
-            </section>
           </>
         )}
       </main>
