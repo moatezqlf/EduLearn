@@ -108,7 +108,7 @@ const SkeletonCard = () => (
 
 export default function StudentDashboard() {
   const { user, logout, updateUser } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const navigate = useNavigate();
   const [activeNav,   setActiveNav]   = useState("dashboard");
   const [isMobile,    setIsMobile]    = useState(() => window.innerWidth < 769);
@@ -259,7 +259,7 @@ export default function StudentDashboard() {
         {/* Header */}
         <div className="header-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
           <div>
-            <p style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 3 }}>{new Date().toLocaleDateString("fr-FR", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</p>
+            <p style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 3 }}>{new Date().toLocaleDateString(lang === "en" ? "en-GB" : "fr-FR", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</p>
             <h1 style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 24, color: "#1A1D23", letterSpacing: "-.02em" }}>
               {greeting}, {user?.name?.split(" ")[0] || t("role_student")} 👋
             </h1>
@@ -283,7 +283,7 @@ export default function StudentDashboard() {
         {showProfile && (
           <div className="fade-up" style={{ maxWidth: 600 }}>
             <div className="card" style={{ padding: 24, marginBottom: 20 }}>
-              <h2 className="section-title" style={{ marginBottom: 20 }}>My Profile</h2>
+              <h2 className="section-title" style={{ marginBottom: 20 }}>{t("my_profile")}</h2>
               <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24, padding: 16, background: "#F9FAFB", borderRadius: 12 }}>
                 <div style={{ width: 64, height: 64, borderRadius: "50%", background: "linear-gradient(135deg,#6C63FF,#0EA5E9)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 22, fontWeight: 700 }}>
                   {user?.name?.slice(0,2).toUpperCase() || "??"}
@@ -308,16 +308,16 @@ export default function StudentDashboard() {
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: "#4B5563", display: "block", marginBottom: 6 }}>Full Name</label>
-                  <input className="input-field" value={editName} onChange={e => setEditName(e.target.value)} placeholder="Your full name"/>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: "#4B5563", display: "block", marginBottom: 6 }}>{t("full_name")}</label>
+                  <input className="input-field" value={editName} onChange={e => setEditName(e.target.value)} placeholder={t("full_name")}/>
                 </div>
                 <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: "#4B5563", display: "block", marginBottom: 6 }}>Email</label>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: "#4B5563", display: "block", marginBottom: 6 }}>{t("email_label")}</label>
                   <input className="input-field" value={user?.email || ""} disabled style={{ opacity: .6, cursor: "not-allowed" }}/>
                 </div>
                 <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: "#4B5563", display: "block", marginBottom: 6 }}>Bio</label>
-                  <input className="input-field" value={editBio} onChange={e => setEditBio(e.target.value)} placeholder="Tell us about yourself..."/>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: "#4B5563", display: "block", marginBottom: 6 }}>{t("bio")}</label>
+                  <input className="input-field" value={editBio} onChange={e => setEditBio(e.target.value)} placeholder={t("bio")}/>
                 </div>
               </div>
               {profileMsg && (
@@ -327,9 +327,9 @@ export default function StudentDashboard() {
               )}
               <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
                 <button className="btn-primary" style={{ background: "#6C63FF" }} onClick={saveProfile} disabled={savingProfile}>
-                  {savingProfile ? "Saving…" : "Save Changes"}
+                  {savingProfile ? t("saving") : t("save_changes")}
                 </button>
-                <button className="btn-ghost" style={{ color: "#EF4444", borderColor: "#FECACA" }} onClick={logout}>Sign Out</button>
+                <button className="btn-ghost" style={{ color: "#EF4444", borderColor: "#FECACA" }} onClick={logout}>{t("sign_out")}</button>
               </div>
             </div>
           </div>
@@ -339,8 +339,8 @@ export default function StudentDashboard() {
         {showCourses && (
           <div className="fade-up">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <h2 className="section-title" style={{ fontSize: 18 }}>My Courses</h2>
-              <button className="btn-primary" onClick={() => navigate("/student/catalog")}>Browse Catalog →</button>
+              <h2 className="section-title" style={{ fontSize: 18 }}>{t("my_courses")}</h2>
+              <button className="btn-primary" onClick={() => navigate("/student/catalog")}>{t("browse_catalog")} →</button>
             </div>
             {loading ? (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
@@ -349,9 +349,9 @@ export default function StudentDashboard() {
             ) : courses.length === 0 ? (
               <div className="card" style={{ padding: 40, textAlign: "center" }}>
                 <p style={{ fontSize: 36, marginBottom: 12 }}>📚</p>
-                <p style={{ fontWeight: 600, fontSize: 16, color: "#1A1D23", marginBottom: 4 }}>No courses yet</p>
-                <p style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 20 }}>Browse the catalog and enroll in your first course</p>
-                <button className="btn-primary" onClick={() => navigate("/student/catalog")}>Explore Courses</button>
+                <p style={{ fontWeight: 600, fontSize: 16, color: "#1A1D23", marginBottom: 4 }}>{t("no_courses_student_title")}</p>
+                <p style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 20 }}>{t("no_courses_student_sub")}</p>
+                <button className="btn-primary" onClick={() => navigate("/student/catalog")}>{t("explore_courses")}</button>
               </div>
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
@@ -384,8 +384,8 @@ export default function StudentDashboard() {
         {showAssignments && (
           <div className="fade-up">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <h2 className="section-title" style={{ fontSize: 18 }}>My Submissions</h2>
-              <button className="btn-primary" onClick={() => navigate("/student/submit")}>+ Submit Assignment</button>
+              <h2 className="section-title" style={{ fontSize: 18 }}>{t("my_submissions")}</h2>
+              <button className="btn-primary" onClick={() => navigate("/student/submit")}>{t("submit_assignment_btn")}</button>
             </div>
             {loading ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -394,9 +394,9 @@ export default function StudentDashboard() {
             ) : submissions.length === 0 ? (
               <div className="card" style={{ padding: 40, textAlign: "center" }}>
                 <p style={{ fontSize: 36, marginBottom: 12 }}>✎</p>
-                <p style={{ fontWeight: 600, fontSize: 16, marginBottom: 4 }}>No submissions yet</p>
-                <p style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 20 }}>Submit your first assignment to get AI feedback</p>
-                <button className="btn-primary" onClick={() => navigate("/student/submit")}>Submit Assignment</button>
+                <p style={{ fontWeight: 600, fontSize: 16, marginBottom: 4 }}>{t("no_submissions")}</p>
+                <p style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 20 }}>{t("no_submissions_sub")}</p>
+                <button className="btn-primary" onClick={() => navigate("/student/submit")}>{t("submit_assignment_btn")}</button>
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -424,7 +424,7 @@ export default function StudentDashboard() {
         {/* ── FEEDBACK SECTION ── */}
         {showFeedback && (
           <div className="fade-up">
-            <h2 className="section-title" style={{ fontSize: 18, marginBottom: 16 }}>AI Feedback History</h2>
+            <h2 className="section-title" style={{ fontSize: 18, marginBottom: 16 }}>{t("ai_feedback_label")}</h2>
             {loading ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {[0,1,2].map(i => <div key={i} className="skeleton" style={{ height: 100, borderRadius: 14 }}/>)}
@@ -432,7 +432,7 @@ export default function StudentDashboard() {
             ) : feedbacks.length === 0 ? (
               <div className="card" style={{ padding: 40, textAlign: "center" }}>
                 <p style={{ fontSize: 36, marginBottom: 12 }}>◈</p>
-                <p style={{ fontWeight: 600, fontSize: 16, marginBottom: 4 }}>No feedback yet</p>
+                <p style={{ fontWeight: 600, fontSize: 16, marginBottom: 4 }}>{t("no_feedback_title")}</p>
                 <p style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 20 }}>Submit an assignment to get AI-powered feedback</p>
                 <button className="btn-primary" onClick={() => navigate("/student/submit")}>Submit Assignment</button>
               </div>
@@ -469,7 +469,7 @@ export default function StudentDashboard() {
         {showResources && (
           <div className="fade-up">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <h2 className="section-title" style={{ fontSize: 18 }}>Ressources de vos enseignants</h2>
+              <h2 className="section-title" style={{ fontSize: 18 }}>{t("teacher_resources")}</h2>
               <span style={{ fontSize: 12, color: "#9CA3AF" }}>{teacherResources.length} publication(s)</span>
             </div>
             {loading ? (
@@ -479,8 +479,8 @@ export default function StudentDashboard() {
             ) : teacherResources.length === 0 ? (
               <div className="card" style={{ padding: 40, textAlign: "center" }}>
                 <p style={{ fontSize: 36, marginBottom: 12 }}>📄</p>
-                <p style={{ fontWeight: 600, fontSize: 16, color: "#1A1D23", marginBottom: 4 }}>Aucune ressource disponible</p>
-                <p style={{ fontSize: 13, color: "#9CA3AF" }}>Vos enseignants n'ont pas encore publié de ressources.</p>
+                <p style={{ fontWeight: 600, fontSize: 16, color: "#1A1D23", marginBottom: 4 }}>{t("no_resources")}</p>
+                <p style={{ fontSize: 13, color: "#9CA3AF" }}>{t("no_resources_sub")}</p>
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -512,11 +512,11 @@ export default function StudentDashboard() {
           <div className="fade-up">
             <div className="card" style={{ padding: 18 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <h2 className="section-title" style={{ fontSize: 18 }}>Historique Session</h2>
+                <h2 className="section-title" style={{ fontSize: 18 }}>{t("session_history_label")}</h2>
                 <span style={{ fontSize: 12, color: "#9CA3AF" }}>{sessionHistory.length} session(s)</span>
               </div>
               {sessionHistory.length === 0 ? (
-                <p style={{ fontSize: 13, color: "#9CA3AF", padding: "12px 4px" }}>Aucune session historique pour le moment.</p>
+                <p style={{ fontSize: 13, color: "#9CA3AF", padding: "12px 4px" }}>{t("no_session_history_student")}</p>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {sessionHistory.map((h, idx) => (
@@ -572,8 +572,8 @@ export default function StudentDashboard() {
                 {/* Courses */}
                 <section>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                    <span className="section-title">My Courses</span>
-                    <button className="btn-ghost" style={{ fontSize: 12, padding: "5px 12px" }} onClick={() => setActiveNav("courses")}>View All →</button>
+                    <span className="section-title">{t("my_courses")}</span>
+                    <button className="btn-ghost" style={{ fontSize: 12, padding: "5px 12px" }} onClick={() => setActiveNav("courses")}>{t("view_all")}</button>
                   </div>
                   {loading ? (
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -582,9 +582,9 @@ export default function StudentDashboard() {
                   ) : courses.length === 0 ? (
                     <div className="card" style={{ padding: 32, textAlign: "center" }}>
                       <p style={{ fontSize: 32, marginBottom: 8 }}>📚</p>
-                      <p style={{ fontWeight: 600, color: "#1A1D23", marginBottom: 4 }}>No courses yet</p>
-                      <p style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 16 }}>Browse the catalog and enroll in your first course</p>
-                      <button className="btn-primary" onClick={() => navigate("/student/catalog")}>Explore Courses</button>
+                      <p style={{ fontWeight: 600, color: "#1A1D23", marginBottom: 4 }}>{t("no_courses_student_title")}</p>
+                      <p style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 16 }}>{t("no_courses_student_sub")}</p>
+                      <button className="btn-primary" onClick={() => navigate("/student/catalog")}>{t("explore_courses")}</button>
                     </div>
                   ) : (
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -615,8 +615,8 @@ export default function StudentDashboard() {
                 {/* Submissions */}
                 <section>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                    <span className="section-title">Recent Submissions</span>
-                    <button className="btn-ghost" style={{ fontSize: 12, padding: "5px 12px" }} onClick={() => setActiveNav("assignments")}>View All →</button>
+                    <span className="section-title">{t("recent_submissions")}</span>
+                    <button className="btn-ghost" style={{ fontSize: 12, padding: "5px 12px" }} onClick={() => setActiveNav("assignments")}>{t("view_all")}</button>
                   </div>
                   {loading ? (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -655,30 +655,30 @@ export default function StudentDashboard() {
                 <div style={{ background: "#1A1D23", borderRadius: 16, padding: "20px", color: "#fff" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
                     <div style={{ width: 28, height: 28, borderRadius: 8, background: "#6C63FF22", border: "1px solid #6C63FF44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>◈</div>
-                    <span style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 14 }}>AI Feedback</span>
+                    <span style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 14 }}>{t("ai_feedback_label")}</span>
                     <span style={{ marginLeft: "auto", fontSize: 10, background: "#6C63FF33", color: "#A5A0FF", padding: "2px 8px", borderRadius: 99, fontWeight: 600 }}>LIVE</span>
                   </div>
                   <p style={{ fontSize: 12, color: "#9CA3AF", lineHeight: 1.6, marginBottom: 14 }}>Get instant personalized feedback powered by Claude AI.</p>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     <button className="btn-primary" style={{ background: "#6C63FF", padding: "10px 16px", justifyContent: "center", display: "flex" }} onClick={() => navigate("/student/submit")}>
-                      ◈ Submit for AI Review
+                      ◈ {t("submit_ai_review")}
                     </button>
                     <button className="btn-primary" style={{ background: "#0F6E56", padding: "10px 16px", justifyContent: "center", display: "flex" }} onClick={() => navigate("/student/peer")}>
-                      ⊕ Join Peer Session
+                      ⊕ {t("join_peer_session")}
                     </button>
                   </div>
                 </div>
 
                 {/* Recent feedbacks */}
                 <div>
-                  <p className="section-title" style={{ fontSize: 14, marginBottom: 12 }}>Recent Feedback</p>
+                  <p className="section-title" style={{ fontSize: 14, marginBottom: 12 }}>{t("recent_feedback")}</p>
                   {loading ? (
                     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                       {[0,1].map(i => <div key={i} className="skeleton" style={{ height: 100, borderRadius: 14 }}/>)}
                     </div>
                   ) : feedbacks.length === 0 ? (
                     <div className="card" style={{ padding: 20, textAlign: "center" }}>
-                      <p style={{ fontSize: 13, color: "#9CA3AF" }}>No feedback yet. Submit an assignment to get AI feedback.</p>
+                      <p style={{ fontSize: 13, color: "#9CA3AF" }}>{t("no_feedback_short")}</p>
                     </div>
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -709,7 +709,7 @@ export default function StudentDashboard() {
 
                 {/* Weekly activity */}
                 <div className="card" style={{ padding: 16 }}>
-                  <p className="section-title" style={{ fontSize: 14, marginBottom: 12 }}>Weekly Activity</p>
+                  <p className="section-title" style={{ fontSize: 14, marginBottom: 12 }}>{t("weekly_activity")}</p>
                   <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 60 }}>
                     {(stats?.weeklyActivity || [40,70,55,90,65,80,30]).map((h, i) => (
                       <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>

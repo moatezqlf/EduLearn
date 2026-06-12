@@ -86,36 +86,14 @@ const css = `
 const colors  = ["#6C63FF","#0EA5E9","#10B981","#F59E0B","#EC4899"];
 const avColor = s => colors[(s || "A").charCodeAt(0) % colors.length];
 
-const Donut = ({ value, size = 46, stroke = 5, color }) => {
-  const r = (size - stroke * 2) / 2, c = 2 * Math.PI * r;
-  return (
-    <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#F3F4F6" strokeWidth={stroke}/>
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke}
-        strokeDasharray={c} strokeDashoffset={c - (value/100)*c} strokeLinecap="round"
-        style={{ transition: "stroke-dashoffset 1s cubic-bezier(.4,0,.2,1)" }}/>
-    </svg>
-  );
-};
-
-const Spark = ({ data, color, height = 60 }) => {
-  const max = Math.max(...data, 1);
-  return (
-    <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height }}>
-      {data.map((v, i) => (
-        <div key={i} style={{ flex: 1, height: Math.max(4, (v/max)*height), background: i === data.length-1 ? color : color+"55", borderRadius: "3px 3px 0 0", transition: "height .6s ease" }}/>
-      ))}
-    </div>
-  );
-};
-
 export default function TeacherDashboard() {
   const { user, logout } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const navigate = useNavigate();
   const [activeNav,    setActiveNav]    = useState("dashboard");
   const [isMobile,     setIsMobile]     = useState(() => window.innerWidth < 769);
   const [sidebarOpen,  setSidebarOpen]  = useState(() => window.innerWidth >= 769);
+  const [coursesOpen,  setCoursesOpen]  = useState(false);
 
   useEffect(() => {
     const onResize = () => {
@@ -239,16 +217,72 @@ export default function TeacherDashboard() {
           </div>
         )}
         <nav style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
-          {navItems.map(item => (
-            <div key={item.id} className={`nav-item ${activeNav === item.id ? "active" : ""}`} onClick={() => { item.route ? navigate(item.route) : setActiveNav(item.id); if (isMobile) setSidebarOpen(false); }}>
-              <span style={{ fontSize: 15, width: 20, textAlign: "center" }}>{item.icon}</span>
-              {sidebarOpen && <span>{t(item.key)}</span>}
-              {sidebarOpen && item.id === "subs" && pending > 0 && (
-                <span style={{ marginLeft: "auto", background: "#EF4444", color: "#fff", fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 99 }}>{pending}</span>
-              )}
-            </div>
-          ))}
+          {navItems.map(item => {
+            if (item.id === "courses") {
+              const isCoursesActive = activeNav === "courses";
+              const subOpen = coursesOpen || isCoursesActive;
+              return (
+                <div key="courses">
+                  <div
+                    className={`nav-item ${isCoursesActive ? "active" : ""}`}
+                    onClick={() => {
+                      if (sidebarOpen) {
+                        setCoursesOpen(v => !v);
+                      } else {
+                        setActiveNav("courses");
+                        if (isMobile) setSidebarOpen(false);
+                      }
+                    }}
+                  >
+                    <span style={{ fontSize: 15, width: 20, textAlign: "center" }}>◫</span>
+                    {sidebarOpen && <span style={{ flex: 1 }}>{t("nav_courses")}</span>}
+                    {sidebarOpen && (
+                      <span style={{ fontSize: 10, transition: "transform .2s", display: "inline-block", transform: subOpen ? "rotate(180deg)" : "rotate(0deg)" }}>▾</span>
+                    )}
+                  </div>
+                  {sidebarOpen && subOpen && (
+                    <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1, marginTop: 1 }}>
+                      <div
+                        className={`nav-item ${isCoursesActive ? "active" : ""}`}
+                        style={{ fontSize: 13, padding: "7px 14px", borderRadius: 8 }}
+                        onClick={() => { setActiveNav("courses"); if (isMobile) setSidebarOpen(false); }}
+                      >
+                        <span style={{ fontSize: 13, width: 20, textAlign: "center", opacity: .6 }}>↳</span>
+                        {t("nav_my_courses_sub")}
+                      </div>
+                      <div
+                        className="nav-item"
+                        style={{ fontSize: 13, padding: "7px 14px", borderRadius: 8 }}
+                        onClick={() => { navigate("/teacher/courses/new"); if (isMobile) setSidebarOpen(false); }}
+                      >
+                        <span style={{ fontSize: 13, width: 20, textAlign: "center", opacity: .6 }}>+</span>
+                        {t("nav_new_course_sub")}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            }
+            return (
+              <div key={item.id} className={`nav-item ${activeNav === item.id ? "active" : ""}`} onClick={() => { item.route ? navigate(item.route) : setActiveNav(item.id); if (isMobile) setSidebarOpen(false); }}>
+                <span style={{ fontSize: 15, width: 20, textAlign: "center" }}>{item.icon}</span>
+                {sidebarOpen && <span>{t(item.key)}</span>}
+              </div>
+            );
+          })}
         </nav>
+
+        {/* Peer session CTA */}
+        <div style={{ margin: "12px 6px 8px" }}>
+          <button
+            onClick={() => navigate("/teacher/peer")}
+            style={{ width: "100%", padding: sidebarOpen ? "10px 14px" : "10px 0", background: "#6C63FF", color: "#fff", border: "none", borderRadius: 10, fontWeight: 600, fontSize: sidebarOpen ? 13 : 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: sidebarOpen ? "flex-start" : "center", gap: 8, transition: "all .2s" }}
+          >
+            <span>◈</span>
+            {sidebarOpen && t("launch_peer_session")}
+          </button>
+        </div>
+
         <div style={{ borderTop: "1px solid #F3F4F6", paddingTop: 14, display: "flex", alignItems: "center", gap: 10, padding: "14px 6px 0" }}>
           <div style={{ width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg,#10B981,#0EA5E9)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
             {user?.name?.slice(0,2).toUpperCase() || "TC"}
@@ -269,7 +303,7 @@ export default function TeacherDashboard() {
         {/* Header */}
         <div className="header-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
           <div>
-            <p style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 3 }}>{new Date().toLocaleDateString("fr-FR", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</p>
+            <p style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 3 }}>{new Date().toLocaleDateString(lang === "en" ? "en-GB" : "fr-FR", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</p>
             <h1 style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 24, color: "#1A1D23", letterSpacing: "-.02em" }}>
               {greeting}, {user?.name?.split(" ")[0] || t("role_teacher")} 👩‍🏫
             </h1>
@@ -279,7 +313,7 @@ export default function TeacherDashboard() {
             <button className="btn-sm" onClick={() => setSidebarOpen(v => !v)} style={{ padding: "8px 12px" }}>☰</button>
             <button className="btn-sm" onClick={fetchAll} style={{ padding: "8px 12px" }}>↻</button>
 
-            + New dropdown
+            
             <div className="dropdown" onClick={e => e.stopPropagation()}>
               <button className="btn-primary" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}
                 onClick={() => setShowDropdown(v => !v)}>
@@ -320,7 +354,7 @@ export default function TeacherDashboard() {
         {activeNav === "profile" && (
           <div className="fade-up" style={{ maxWidth: 600 }}>
             <div className="card" style={{ padding: 24, marginBottom: 20 }}>
-              <h2 className="section-title" style={{ marginBottom: 20 }}>My Profile</h2>
+              <h2 className="section-title" style={{ marginBottom: 20 }}>{t("my_profile")}</h2>
               <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24, padding: 16, background: "#F9FAFB", borderRadius: 12 }}>
                 <div style={{ width: 64, height: 64, borderRadius: "50%", background: "linear-gradient(135deg,#10B981,#0EA5E9)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 22, fontWeight: 700 }}>
                   {user?.name?.slice(0,2).toUpperCase() || "TC"}
@@ -332,16 +366,16 @@ export default function TeacherDashboard() {
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: "#4B5563", display: "block", marginBottom: 6 }}>Full Name</label>
-                  <input className="input-field" value={editName} onChange={e => setEditName(e.target.value)} placeholder="Your full name"/>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: "#4B5563", display: "block", marginBottom: 6 }}>{t("full_name")}</label>
+                  <input className="input-field" value={editName} onChange={e => setEditName(e.target.value)} placeholder={t("full_name")}/>
                 </div>
                 <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: "#4B5563", display: "block", marginBottom: 6 }}>Email</label>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: "#4B5563", display: "block", marginBottom: 6 }}>{t("email_label")}</label>
                   <input className="input-field" value={user?.email || ""} disabled style={{ opacity: .6, cursor: "not-allowed" }}/>
                 </div>
                 <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: "#4B5563", display: "block", marginBottom: 6 }}>Bio</label>
-                  <input className="input-field" value={editBio} onChange={e => setEditBio(e.target.value)} placeholder="Tell students about yourself..."/>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: "#4B5563", display: "block", marginBottom: 6 }}>{t("bio")}</label>
+                  <input className="input-field" value={editBio} onChange={e => setEditBio(e.target.value)} placeholder={t("bio")}/>
                 </div>
               </div>
               {profileMsg && (
@@ -351,9 +385,9 @@ export default function TeacherDashboard() {
               )}
               <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
                 <button className="btn-primary" style={{ background: "#10B981" }} onClick={saveProfile} disabled={savingProfile}>
-                  {savingProfile ? "Saving…" : "Save Changes"}
+                  {savingProfile ? t("saving") : t("save_changes")}
                 </button>
-                <button className="btn-sm" style={{ color: "#EF4444", borderColor: "#FECACA" }} onClick={logout}>Sign Out</button>
+                <button className="btn-sm" style={{ color: "#EF4444", borderColor: "#FECACA" }} onClick={logout}>{t("sign_out")}</button>
               </div>
             </div>
           </div>
@@ -363,11 +397,11 @@ export default function TeacherDashboard() {
           <div className="fade-up">
             <div className="card" style={{ padding: 18 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <span className="section-title">Historique Session</span>
+                <span className="section-title">{t("session_history_label")}</span>
                 <span style={{ fontSize: 12, color: "#9CA3AF" }}>{sessionHistory.length} session(s)</span>
               </div>
               {sessionHistory.length === 0 ? (
-                <p style={{ fontSize: 13, color: "#9CA3AF", padding: "12px 4px" }}>Aucune session historique disponible.</p>
+                <p style={{ fontSize: 13, color: "#9CA3AF", padding: "12px 4px" }}>{t("no_session_history")}</p>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {sessionHistory.map((h) => (
@@ -397,17 +431,17 @@ export default function TeacherDashboard() {
           <div className="fade-up">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }} className="header-row">
               <h1 style={{ fontSize: 22, fontWeight: 700, fontFamily: "'Syne',sans-serif", color: "#1A1D23" }}>
-                Mes cours <span style={{ fontSize: 14, fontWeight: 500, color: "#9CA3AF", marginLeft: 6 }}>({courses.length})</span>
+                {t("my_courses")} <span style={{ fontSize: 14, fontWeight: 500, color: "#9CA3AF", marginLeft: 6 }}>({courses.length})</span>
               </h1>
-              <button className="btn-primary" onClick={() => navigate("/teacher/courses/new")}>+ Nouveau cours</button>
+              <button className="btn-primary" onClick={() => navigate("/teacher/courses/new")}>+ {t("new_course")}</button>
             </div>
             {loading ? (
               [0,1,2].map(i => <div key={i} className="skeleton" style={{ height: 90, borderRadius: 12, marginBottom: 10 }}/>)
             ) : courses.length === 0 ? (
               <div className="card" style={{ padding: 40, textAlign: "center" }}>
                 <div style={{ fontSize: 40, marginBottom: 12 }}>📚</div>
-                <p style={{ fontSize: 14, color: "#9CA3AF", marginBottom: 16 }}>Vous n'avez pas encore créé de cours.</p>
-                <button className="btn-primary" onClick={() => navigate("/teacher/courses/new")}>Créer mon premier cours</button>
+                <p style={{ fontSize: 14, color: "#9CA3AF", marginBottom: 16 }}>{t("no_courses_teacher")}</p>
+                <button className="btn-primary" onClick={() => navigate("/teacher/courses/new")}>{t("create_first_course")}</button>
               </div>
             ) : (
               <div className="courses-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 14 }}>
@@ -422,7 +456,7 @@ export default function TeacherDashboard() {
                           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
                             <p style={{ fontWeight: 700, fontSize: 14, color: "#1A1D23" }}>{c.title}</p>
                             <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5, background: c.published ? "#D1FAE5" : "#F3F4F6", color: c.published ? "#065F46" : "#6B7280" }}>
-                              {c.published ? "Publié" : "Brouillon"}
+                              {c.published ? t("published") : t("draft")}
                             </span>
                           </div>
                           {c.description && <p style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{c.description}</p>}
@@ -443,7 +477,7 @@ export default function TeacherDashboard() {
                       </div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <button className="btn-primary" style={{ flex: 1, fontSize: 12 }} onClick={() => navigate(`/teacher/courses/${c._id}`)}>
-                          Gérer
+                          {t("manage")}
                         </button>
                         <button className="btn-sm" onClick={() => navigate(`/teacher/assignments/new/${c._id}`)}>+ Devoir</button>
                         <button className="btn-sm" onClick={() => navigate(`/teacher/courses/${c._id}`)}>Ressources</button>
@@ -462,7 +496,7 @@ export default function TeacherDashboard() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 12 }} className="header-row">
               <div>
                 <h1 style={{ fontSize: 22, fontWeight: 700, fontFamily: "'Syne',sans-serif", color: "#1A1D23" }}>
-                  Mes étudiants
+                  {t("my_students")}
                 </h1>
                 {studentsData && (
                   <p style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>
@@ -483,7 +517,7 @@ export default function TeacherDashboard() {
                   value={studentSearch}
                   onChange={e => setStudentSearch(e.target.value)}
                 />
-                <button className="btn-sm" onClick={fetchStudents} disabled={studentsLoading}>↻ Actualiser</button>
+                <button className="btn-sm" onClick={fetchStudents} disabled={studentsLoading}>↻ {t("btn_refresh")}</button>
               </div>
             </div>
 
@@ -494,8 +528,8 @@ export default function TeacherDashboard() {
             ) : !studentsData || studentsData.groups?.length === 0 ? (
               <div className="card" style={{ padding: 40, textAlign: "center" }}>
                 <div style={{ fontSize: 40, marginBottom: 12 }}>👥</div>
-                <p style={{ fontSize: 14, color: "#9CA3AF", marginBottom: 8 }}>Aucun étudiant inscrit à vos cours pour le moment.</p>
-                <p style={{ fontSize: 12, color: "#C0C4CC" }}>Créez un cours et partagez-le avec vos étudiants.</p>
+                <p style={{ fontSize: 14, color: "#9CA3AF", marginBottom: 8 }}>{t("no_students")}</p>
+                <p style={{ fontSize: 12, color: "#C0C4CC" }}>{t("no_students_sub")}</p>
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -570,110 +604,49 @@ export default function TeacherDashboard() {
               ))}
             </div>
 
-            {/* Grid */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 24 }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-
-                {/* My Courses — only this teacher's */}
-                <section>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                    <span className="section-title">My Courses ({courses.length})</span>
-                    <button className="btn-primary" style={{ fontSize: 12, padding: "6px 14px" }} onClick={() => navigate("/teacher/courses/new")}>+ New Course</button>
-                  </div>
-                  {loading ? [0,1].map(i => <div key={i} className="skeleton" style={{ height: 80, borderRadius: 10, marginBottom: 8 }}/>) :
-                   courses.length === 0 ? (
-                    <div className="card" style={{ padding: 24, textAlign: "center" }}>
-                      <p style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 12 }}>You haven't created any courses yet.</p>
-                      <button className="btn-primary" onClick={() => navigate("/teacher/courses/new")}>Create your first course</button>
-                    </div>
-                   ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                      {courses.map((c, i) => {
-                        const color = colors[i % colors.length];
-                        const thumb = c.title.split(" ").slice(0,2).map(w => w[0]).join("").toUpperCase();
-                        return (
-                          <div className="course-row" key={c._id}>
-                            <div style={{ width: 42, height: 42, borderRadius: 10, background: color+"18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color, flexShrink: 0 }}>{thumb}</div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                                <p style={{ fontWeight: 600, fontSize: 13, color: "#1A1D23", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</p>
-                                <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5, background: c.published ? "#D1FAE5" : "#F3F4F6", color: c.published ? "#065F46" : "#6B7280", flexShrink: 0 }}>
-                                  {c.published ? "Published" : "Draft"}
-                                </span>
-                              </div>
-                              <div style={{ display: "flex", gap: 14, fontSize: 11, color: "#9CA3AF" }}>
-                                <span>⊕ {c.enrollments || 0} students</span>
-                                <span>◫ {c.modules?.length || 0} modules</span>
-                                {c.rating > 0 && <span>★ {c.rating}</span>}
-                              </div>
-                            </div>
-                            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                              <button className="btn-sm" onClick={e => { e.stopPropagation(); navigate(`/teacher/courses/${c._id}`); }}>Ressources</button>
-                              <button className="btn-sm" onClick={e => { e.stopPropagation(); navigate(`/teacher/assignments/new/${c._id}`); }}>+ Devoir</button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                   )}
-                </section>
+            {/* Courses list */}
+            <section>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <span className="section-title">{t("my_courses")} ({courses.length})</span>
+                <button className="btn-primary" style={{ fontSize: 12, padding: "6px 14px" }} onClick={() => navigate("/teacher/courses/new")}>+ {t("new_course")}</button>
               </div>
-
-              {/* Right column */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                <div className="card" style={{ padding: 18 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                    <span className="section-title" style={{ fontSize: 14 }}>Submissions / Week</span>
-                    <span style={{ fontSize: 11, color: "#9CA3AF" }}>Last 7 days</span>
-                  </div>
-                  <Spark data={[12,19,8,24,17,21,9]} color="#6C63FF" height={60}/>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-                    {"MTWTFSS".split("").map((d, i) => <span key={i} style={{ flex: 1, textAlign: "center", fontSize: 9, color: "#9CA3AF" }}>{d}</span>)}
-                  </div>
-                  <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #F3F4F6", display: "flex", justifyContent: "space-between" }}>
-                    <div><p style={{ fontSize: 18, fontWeight: 700, color: "#1A1D23", fontFamily: "'Syne',sans-serif" }}>{submissions.length}</p><p style={{ fontSize: 11, color: "#9CA3AF" }}>total submissions</p></div>
-                    <div style={{ textAlign: "right" }}><p style={{ fontSize: 13, fontWeight: 600, color: "#10B981" }}>+18%</p><p style={{ fontSize: 11, color: "#9CA3AF" }}>vs last week</p></div>
-                  </div>
+              {loading ? [0,1].map(i => <div key={i} className="skeleton" style={{ height: 80, borderRadius: 10, marginBottom: 8 }}/>) :
+               courses.length === 0 ? (
+                <div className="card" style={{ padding: 24, textAlign: "center" }}>
+                  <p style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 12 }}>{t("no_courses_teacher")}</p>
+                  <button className="btn-primary" onClick={() => navigate("/teacher/courses/new")}>{t("create_first_course")}</button>
                 </div>
-
-                {courses.filter(c => c.published).length > 0 && (
-                  <div className="card" style={{ padding: 18 }}>
-                    <span className="section-title" style={{ fontSize: 14, display: "block", marginBottom: 14 }}>Completion Rates</span>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                      {courses.filter(c => c.published).slice(0,4).map((c, i) => {
-                        const pct = 62, color = colors[i % colors.length];
-                        return (
-                          <div key={c._id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                            <div style={{ position: "relative", width: 46, height: 46, flexShrink: 0 }}>
-                              <Donut value={pct} size={46} stroke={5} color={color}/>
-                              <span style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", fontSize: 10, fontWeight: 700, color: "#1A1D23" }}>{pct}%</span>
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <p style={{ fontSize: 12, fontWeight: 600, color: "#1A1D23", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</p>
-                              <p style={{ fontSize: 11, color: "#9CA3AF" }}>{c.enrollments || 0} students</p>
-                            </div>
+               ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {courses.map((c, i) => {
+                    const color = colors[i % colors.length];
+                    const thumb = c.title.split(" ").slice(0,2).map(w => w[0]).join("").toUpperCase();
+                    return (
+                      <div className="course-row" key={c._id}>
+                        <div style={{ width: 42, height: 42, borderRadius: 10, background: color+"18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color, flexShrink: 0 }}>{thumb}</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                            <p style={{ fontWeight: 600, fontSize: 13, color: "#1A1D23", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</p>
+                            <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5, background: c.published ? "#D1FAE5" : "#F3F4F6", color: c.published ? "#065F46" : "#6B7280", flexShrink: 0 }}>
+                              {c.published ? t("published") : t("draft")}
+                            </span>
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                <div style={{ background: "#1A1D23", borderRadius: 14, border: "1px solid #2D3139", padding: 18 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                    <div style={{ width: 26, height: 26, borderRadius: 7, background: "#6C63FF22", border: "1px solid #6C63FF44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: "#A5A0FF" }}>◈</div>
-                    <span style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 13, color: "#fff" }}>AI Grading Assistant</span>
-                  </div>
-                  <p style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.6, marginBottom: 12 }}>
-                    {pending} pending submission{pending !== 1 ? "s" : ""} waiting for review.
-                  </p>
-                  <button className="btn-primary" style={{ width: "100%", background: "#6C63FF", padding: "10px 16px", fontSize: 12 }}
-                    onClick={() => navigate("/teacher/peer")}>
-                    ◈ Launch Peer Session
-                  </button>
+                          <div style={{ display: "flex", gap: 14, fontSize: 11, color: "#9CA3AF" }}>
+                            <span>⊕ {c.enrollments || 0} {t("nav_students").toLowerCase()}</span>
+                            <span>◫ {c.modules?.length || 0} modules</span>
+                            {c.rating > 0 && <span>★ {c.rating}</span>}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                          <button className="btn-sm" onClick={e => { e.stopPropagation(); navigate(`/teacher/courses/${c._id}`); }}>{t("manage")}</button>
+                          <button className="btn-sm" onClick={e => { e.stopPropagation(); navigate(`/teacher/assignments/new/${c._id}`); }}>+ {t("new_assignment")}</button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
-            </div>
+               )}
+            </section>
           </>
         )}
       </main>
