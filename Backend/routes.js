@@ -17,6 +17,7 @@ import {
 import { PeerSession, Session, SessionSubmission } from "./Session.model.js";
 import { getIO } from "./Socket.server.js";
 import { getPlatformSettings } from "./services/settings.js";
+import { sendEmail } from "./services/email.js";
 import { registerExtraRoutes } from "./routesExtra.js";
 
 const router = express.Router();
@@ -1209,6 +1210,43 @@ router.post("/sessions/create", auth, role("teacher", "admin"), uploadSessionMed
         const payload = { teacherName: teacher.name, question: question.trim(), joinCode: code };
         for (const studentId of studentIds) {
           io.to(studentId).emit("new_session", payload);
+        }
+
+        // Send email notifications — fetch student emails in bulk
+        const studentDocs = await User.find({ _id: { $in: studentIds } }).select("email name").lean();
+        const appUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+        const startedAt = new Date().toLocaleString("fr-FR", { dateStyle: "full", timeStyle: "short" });
+        for (const st of studentDocs) {
+          if (!st.email) continue;
+          sendEmail({
+            to: st.email,
+            subject: `📚 Nouvelle session disponible — ${teacher.name}`,
+            html: `
+              <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px;background:#f7f8fc;border-radius:12px;">
+                <div style="background:#1a1d23;border-radius:10px;padding:20px 24px;color:#fff;margin-bottom:20px;">
+                  <p style="margin:0 0 4px;font-size:12px;color:#9ca3af;">Session pairs — EduLearn</p>
+                  <h2 style="margin:0;font-size:20px;font-weight:700;">${teacher.name} vous invite</h2>
+                </div>
+                <div style="background:#fff;border-radius:10px;padding:20px 24px;border:1px solid #eaecf0;margin-bottom:16px;">
+                  <p style="margin:0 0 8px;font-size:12px;color:#9ca3af;text-transform:uppercase;font-weight:600;">Sujet de la session</p>
+                  <p style="margin:0;font-size:16px;color:#1a1d23;font-weight:600;line-height:1.5;">${question.trim()}</p>
+                </div>
+                <div style="background:#fff;border-radius:10px;padding:16px 24px;border:1px solid #eaecf0;margin-bottom:20px;display:flex;gap:24px;">
+                  <div>
+                    <p style="margin:0 0 4px;font-size:11px;color:#9ca3af;font-weight:600;">CODE DE REJOINDRE</p>
+                    <p style="margin:0;font-size:24px;font-weight:800;color:#6c63ff;letter-spacing:3px;">${code}</p>
+                  </div>
+                  <div>
+                    <p style="margin:0 0 4px;font-size:11px;color:#9ca3af;font-weight:600;">LANCÉE LE</p>
+                    <p style="margin:0;font-size:13px;font-weight:600;color:#1a1d23;">${startedAt}</p>
+                  </div>
+                </div>
+                <a href="${appUrl}/student/peer" style="display:block;background:#6c63ff;color:#fff;text-align:center;padding:13px;border-radius:9px;text-decoration:none;font-weight:700;font-size:14px;">
+                  ◈ Rejoindre la session →
+                </a>
+                <p style="margin:16px 0 0;font-size:11px;color:#9ca3af;text-align:center;">EduLearn — Plateforme d'apprentissage collaboratif</p>
+              </div>`,
+          }).catch(e => console.error("[Session email]", e.message));
         }
       }
     } catch (e) {

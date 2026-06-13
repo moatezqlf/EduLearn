@@ -1,8 +1,3 @@
-// ─────────────────────────────────────────────────────────────
-//  ActiveSessions.jsx  —  Shows available peer sessions
-//  Embed this in StudentDashboard.jsx
-//  Usage: <ActiveSessions />
-// ─────────────────────────────────────────────────────────────
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
@@ -10,13 +5,24 @@ import { useSocket } from "./Usesocket";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
-const phaseColors = {
-  waiting:   { bg: "#FFF3CD", color: "#92600A", label: "Waiting for students" },
-  answering: { bg: "#D1FAE5", color: "#065F46", label: "Answering" },
-  reviewing: { bg: "#EEF2FF", color: "#3730A3", label: "Peer Review" },
-  improving: { bg: "#E0E7FF", color: "#3730A3", label: "AI Improving" },
-  results:   { bg: "#D1FAE5", color: "#065F46", label: "Results" },
-  quiz:      { bg: "#FEE2E2", color: "#DC2626", label: "Quiz" },
+const phaseLabel = {
+  waiting:   { label: "En attente",    color: "#F59E0B", bg: "#FFFBEB" },
+  answering: { label: "Rédaction",     color: "#10B981", bg: "#ECFDF5" },
+  reviewing: { label: "Révision pairs", color: "#6C63FF", bg: "#EEF2FF" },
+  improving: { label: "IA en cours",   color: "#3B82F6", bg: "#EFF6FF" },
+  results:   { label: "Résultats",     color: "#10B981", bg: "#ECFDF5" },
+};
+
+const avatarColor = (name = "") => {
+  const colors = ["#6C63FF", "#0EA5E9", "#10B981", "#F59E0B", "#EC4899"];
+  return colors[name.charCodeAt(0) % colors.length] || "#6C63FF";
+};
+
+const timeAgo = (date) => {
+  const mins = Math.floor((Date.now() - new Date(date)) / 60000);
+  if (mins < 1) return "À l'instant";
+  if (mins < 60) return `Il y a ${mins} min`;
+  return `Il y a ${Math.floor(mins / 60)} h`;
 };
 
 export default function Activesessions() {
@@ -24,37 +30,23 @@ export default function Activesessions() {
   const navigate = useNavigate();
   const { socket } = useSocket();
   const [sessions, setSessions] = useState([]);
-  const [loading, setLoading]   = useState(true);
+  const [loading, setLoading] = useState(true);
 
-  // Fetch active sessions on mount
-  useEffect(() => {
-    fetchSessions();
-  }, []);
+  useEffect(() => { fetchSessions(); }, []);
 
-  // Listen for new sessions in real-time
   useEffect(() => {
     if (!socket) return;
-
     socket.on("new_session", (data) => {
-      // Add new session to the list
       setSessions(prev => {
-        // Avoid duplicates
         if (prev.some(s => s.code === data.joinCode)) return prev;
         return [{
-          id: Date.now(),
-          code: data.joinCode,
-          question: data.question,
-          phase: "waiting",
-          teacher: { name: data.teacherName },
-          totalMembers: 0,
-          totalGroups: 0,
-          hasJoined: false,
-          createdAt: new Date().toISOString(),
-          isNew: true, // for animation
+          id: Date.now(), code: data.joinCode, question: data.question,
+          phase: "waiting", teacher: { name: data.teacherName },
+          totalMembers: 0, totalGroups: 0, hasJoined: false,
+          createdAt: new Date().toISOString(), isNew: true,
         }, ...prev];
       });
     });
-
     return () => socket.off("new_session");
   }, [socket]);
 
@@ -75,157 +67,103 @@ export default function Activesessions() {
     }
   };
 
-  const joinSession = (code) => {
-    navigate("/student/peer", { state: { joinCode: code } });
-  };
-
-  const timeAgo = (date) => {
-    const mins = Math.floor((Date.now() - new Date(date)) / 60000);
-    if (mins < 1) return "Just now";
-    if (mins < 60) return `${mins}m ago`;
-    return `${Math.floor(mins / 60)}h ago`;
-  };
-
-  if (loading) {
-    return (
-      <div style={{
-        background: "#fff", borderRadius: 14, border: "1px solid #EAECF0",
-        padding: 20, marginBottom: 20,
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-          <div style={{ width: 14, height: 14, border: "2px solid #EEF2FF", borderTopColor: "#6C63FF", borderRadius: "50%", animation: "spin .8s linear infinite" }} />
-          <span style={{ fontSize: 13, color: "#9CA3AF" }}>Loading sessions…</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (sessions.length === 0) return null; // Don't show section if no active sessions
+  if (loading || sessions.length === 0) return null;
 
   return (
-    <div style={{ marginBottom: 24 }}>
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{
-            width: 10, height: 10, borderRadius: "50%",
-            background: "#10B981",
-            boxShadow: "0 0 0 3px rgba(16,185,129,0.2)",
-            animation: "pulse 2s infinite",
-          }} />
-          <h2 style={{
-            fontFamily: "'Syne',sans-serif", fontSize: 16, fontWeight: 700,
-            color: "#1A1D23", letterSpacing: "-.01em",
-          }}>
-            Live Sessions
-          </h2>
-          <span style={{
-            fontSize: 11, fontWeight: 600, padding: "2px 10px",
-            borderRadius: 99, background: "#D1FAE5", color: "#065F46",
-          }}>
+    <div style={{ marginBottom: 28 }}>
+      {/* Section header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#10B981", display: "inline-block", boxShadow: "0 0 0 3px rgba(16,185,129,.18)", animation: "livePulse 1.8s ease-in-out infinite" }} />
+          <span style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 15, color: "#1A1D23" }}>
+            Sessions en direct
+          </span>
+          <span style={{ background: "#ECFDF5", color: "#065F46", fontSize: 11, fontWeight: 700, padding: "2px 9px", borderRadius: 99 }}>
             {sessions.length}
           </span>
         </div>
-        <button onClick={fetchSessions} style={{
-          background: "none", border: "1px solid #EAECF0", borderRadius: 8,
-          padding: "5px 12px", fontSize: 12, color: "#6B7280", cursor: "pointer",
-        }}>
-          ↻ Refresh
+        <button onClick={fetchSessions} style={{ background: "none", border: "1px solid #EAECF0", borderRadius: 7, padding: "4px 11px", fontSize: 11, color: "#6B7280", cursor: "pointer" }}>
+          ↻
         </button>
       </div>
 
-      {/* Sessions list */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Cards */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {sessions.map((session) => {
-          const phaseInfo = phaseColors[session.phase] || { bg: "#F3F4F6", color: "#9CA3AF", label: session.phase };
+          const phase = phaseLabel[session.phase] || { label: session.phase, color: "#9CA3AF", bg: "#F3F4F6" };
+          const avBg  = avatarColor(session.teacher?.name || "T");
+          const initial = (session.teacher?.name || "T").charAt(0).toUpperCase();
 
           return (
-            <div key={session.code} style={{
-              background: "#fff",
-              borderRadius: 14,
-              border: session.isNew ? "2px solid #6C63FF" : "1px solid #EAECF0",
-              padding: "16px 20px",
-              display: "flex",
-              alignItems: "center",
-              gap: 16,
-              animation: session.isNew ? "fadeUp .4s ease" : "none",
-              transition: "border-color .2s, box-shadow .2s",
-              boxShadow: session.isNew ? "0 0 0 4px rgba(108,99,255,0.1)" : "none",
-            }}>
-              {/* Teacher avatar */}
-              <div style={{
-                width: 44, height: 44, borderRadius: "50%",
-                background: "linear-gradient(135deg, #6C63FF, #8B5CF6)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 16, fontWeight: 700, color: "#fff", flexShrink: 0,
-              }}>
-                {session.teacher?.name?.charAt(0)?.toUpperCase() || "T"}
+            <div
+              key={session.code}
+              style={{
+                borderRadius: 16,
+                overflow: "hidden",
+                border: session.isNew ? "2px solid #6C63FF" : "1px solid #EAECF0",
+                background: "#fff",
+                boxShadow: session.isNew ? "0 0 0 4px rgba(108,99,255,.09)" : "0 2px 12px rgba(0,0,0,.04)",
+                animation: session.isNew ? "announceFadeIn .5s ease" : "none",
+              }}
+            >
+              {/* Top bar */}
+              <div style={{ background: "#1A1D23", padding: "12px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {/* Avatar */}
+                  <div style={{ width: 36, height: 36, borderRadius: "50%", background: avBg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff", flexShrink: 0 }}>
+                    {initial}
+                  </div>
+                  <div>
+                    <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#fff" }}>{session.teacher?.name || "Enseignant"}</p>
+                    <p style={{ margin: 0, fontSize: 11, color: "#6B7280" }}>{timeAgo(session.createdAt)}</p>
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {session.isNew && (
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, background: "#6C63FF", color: "#fff" }}>NOUVEAU</span>
+                  )}
+                  <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 99, background: phase.bg, color: phase.color }}>
+                    {phase.label}
+                  </span>
+                </div>
               </div>
 
-              {/* Info */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: "#1A1D23" }}>
-                    {session.teacher?.name || "Teacher"}
-                  </span>
-                  <span style={{
-                    fontSize: 10, fontWeight: 600, padding: "2px 8px",
-                    borderRadius: 99, background: phaseInfo.bg, color: phaseInfo.color,
-                  }}>
-                    {phaseInfo.label}
-                  </span>
-                  {session.isNew && (
-                    <span style={{
-                      fontSize: 10, fontWeight: 700, padding: "2px 8px",
-                      borderRadius: 99, background: "#6C63FF", color: "#fff",
-                    }}>
-                      NEW
-                    </span>
-                  )}
+              {/* Body */}
+              <div style={{ padding: "16px 18px 18px" }}>
+                {/* Code badge */}
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: ".05em" }}>Code</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: "#6C63FF", letterSpacing: "2px", background: "#EEF2FF", padding: "2px 10px", borderRadius: 6 }}>{session.code}</span>
+                  <span style={{ fontSize: 11, color: "#9CA3AF" }}>·</span>
+                  <span style={{ fontSize: 11, color: "#9CA3AF" }}>{session.totalMembers} étudiant{session.totalMembers !== 1 ? "s" : ""}</span>
                 </div>
-                <p style={{
-                  fontSize: 12, color: "#4B5563", lineHeight: 1.5,
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                }}>
+
+                {/* Question */}
+                <p style={{ margin: "0 0 14px", fontSize: 14, fontWeight: 600, color: "#1A1D23", lineHeight: 1.55 }}>
                   {session.question}
                 </p>
-                <div style={{ display: "flex", gap: 12, marginTop: 6, fontSize: 11, color: "#9CA3AF" }}>
-                  <span>{session.totalMembers} student{session.totalMembers !== 1 ? "s" : ""}</span>
-                  <span>·</span>
-                  <span>{session.totalGroups} group{session.totalGroups !== 1 ? "s" : ""}</span>
-                  <span>·</span>
-                  <span>{timeAgo(session.createdAt)}</span>
-                </div>
-              </div>
 
-              {/* Join button */}
-              <div style={{ flexShrink: 0 }}>
+                {/* Join CTA */}
                 {session.hasJoined ? (
-                  <button onClick={() => joinSession(session.code)} style={{
-                    padding: "8px 18px", borderRadius: 9, fontSize: 12, fontWeight: 600,
-                    border: "1px solid #10B981", background: "#D1FAE5", color: "#065F46",
-                    cursor: "pointer", transition: "all .15s",
-                  }}>
-                    Rejoin →
+                  <button
+                    onClick={() => navigate("/student/peer", { state: { joinCode: session.code } })}
+                    style={{ width: "100%", padding: "11px", background: "#ECFDF5", color: "#065F46", border: "1px solid #6EE7B7", borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+                  >
+                    ↩ Reprendre la session
                   </button>
                 ) : session.phase === "waiting" ? (
-                  <button onClick={() => joinSession(session.code)} style={{
-                    padding: "8px 18px", borderRadius: 9, fontSize: 12, fontWeight: 600,
-                    border: "none", background: "#6C63FF", color: "#fff",
-                    cursor: "pointer", transition: "all .15s",
-                  }}
+                  <button
+                    onClick={() => navigate("/student/peer", { state: { joinCode: session.code } })}
+                    style={{ width: "100%", padding: "11px", background: "#6C63FF", color: "#fff", border: "none", borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: "pointer", letterSpacing: ".01em" }}
                     onMouseOver={e => e.currentTarget.style.background = "#5a52e0"}
                     onMouseOut={e => e.currentTarget.style.background = "#6C63FF"}
                   >
-                    Join Now →
+                    ◈ Rejoindre la session →
                   </button>
                 ) : (
-                  <span style={{
-                    padding: "8px 14px", borderRadius: 9, fontSize: 11, fontWeight: 500,
-                    background: "#F3F4F6", color: "#9CA3AF",
-                  }}>
-                    In progress
-                  </span>
+                  <div style={{ padding: "9px 14px", background: "#F9FAFB", borderRadius: 10, fontSize: 12, color: "#9CA3AF", textAlign: "center", border: "1px solid #F3F4F6" }}>
+                    Session en cours — arrivée tardive non disponible
+                  </div>
                 )}
               </div>
             </div>
@@ -234,9 +172,8 @@ export default function Activesessions() {
       </div>
 
       <style>{`
-        @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes pulse { 0%, 100% { opacity: .4; } 50% { opacity: 1; } }
+        @keyframes livePulse { 0%,100%{opacity:.4;transform:scale(1)} 50%{opacity:1;transform:scale(1.25)} }
+        @keyframes announceFadeIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
       `}</style>
     </div>
   );

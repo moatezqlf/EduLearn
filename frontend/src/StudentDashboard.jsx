@@ -110,9 +110,10 @@ export default function StudentDashboard() {
   const { user, logout, updateUser } = useAuth();
   const { t, lang } = useLang();
   const navigate = useNavigate();
-  const [activeNav,   setActiveNav]   = useState("dashboard");
-  const [isMobile,    setIsMobile]    = useState(() => window.innerWidth < 769);
-  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 769);
+  const [activeNav,    setActiveNav]   = useState("dashboard");
+  const [isMobile,     setIsMobile]   = useState(() => window.innerWidth < 769);
+  const [sidebarOpen,  setSidebarOpen] = useState(() => window.innerWidth >= 769);
+  const [coursesOpen,  setCoursesOpen] = useState(false);
 
   useEffect(() => {
     const onResize = () => {
@@ -232,12 +233,55 @@ export default function StudentDashboard() {
           {sidebarOpen && <span style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 15, whiteSpace: "nowrap" }}>EduLearn</span>}
         </div>
         <nav style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
-          {navItems.map(item => (
-            <div key={item.id} className={`nav-item ${activeNav === item.id ? "active" : ""}`} onClick={() => { handleNav(item); if (isMobile) setSidebarOpen(false); }}>
-              <span style={{ fontSize: 15, width: 20, textAlign: "center" }}>{item.icon}</span>
-              {sidebarOpen && <span>{t(item.key)}</span>}
-            </div>
-          ))}
+          {navItems.map(item => {
+            if (item.id === "courses") {
+              const isActive = activeNav === "courses";
+              const subOpen = coursesOpen || isActive;
+              return (
+                <div key="courses">
+                  <div
+                    className={`nav-item ${isActive ? "active" : ""}`}
+                    onClick={() => {
+                      if (sidebarOpen) setCoursesOpen(v => !v);
+                      else { setActiveNav("courses"); if (isMobile) setSidebarOpen(false); }
+                    }}
+                  >
+                    <span style={{ fontSize: 15, width: 20, textAlign: "center" }}>◫</span>
+                    {sidebarOpen && <span style={{ flex: 1 }}>{t("nav_courses")}</span>}
+                    {sidebarOpen && (
+                      <span style={{ fontSize: 10, display: "inline-block", transition: "transform .2s", transform: subOpen ? "rotate(180deg)" : "rotate(0deg)" }}>▾</span>
+                    )}
+                  </div>
+                  {sidebarOpen && subOpen && (
+                    <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1, marginTop: 1 }}>
+                      <div
+                        className={`nav-item ${isActive ? "active" : ""}`}
+                        style={{ fontSize: 13, padding: "7px 14px", borderRadius: 8 }}
+                        onClick={() => { setActiveNav("courses"); if (isMobile) setSidebarOpen(false); }}
+                      >
+                        <span style={{ fontSize: 13, width: 20, textAlign: "center", opacity: .6 }}>↳</span>
+                        {t("nav_my_courses_sub")}
+                      </div>
+                      <div
+                        className="nav-item"
+                        style={{ fontSize: 13, padding: "7px 14px", borderRadius: 8 }}
+                        onClick={() => { navigate("/student/catalog"); if (isMobile) setSidebarOpen(false); }}
+                      >
+                        <span style={{ fontSize: 13, width: 20, textAlign: "center", opacity: .6 }}>🔍</span>
+                        {t("nav_catalog")}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            }
+            return (
+              <div key={item.id} className={`nav-item ${activeNav === item.id ? "active" : ""}`} onClick={() => { handleNav(item); if (isMobile) setSidebarOpen(false); }}>
+                <span style={{ fontSize: 15, width: 20, textAlign: "center" }}>{item.icon}</span>
+                {sidebarOpen && <span>{t(item.key)}</span>}
+              </div>
+            );
+          })}
         </nav>
         <div style={{ borderTop: "1px solid #F3F4F6", paddingTop: 14, display: "flex", alignItems: "center", gap: 10, padding: "14px 6px 0" }}>
           <div style={{ width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg,#6C63FF,#0EA5E9)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
@@ -611,47 +655,11 @@ export default function StudentDashboard() {
                     </div>
                   )}
                 </section>
-
-                {/* Submissions */}
-                <section>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                    <span className="section-title">{t("recent_submissions")}</span>
-                    <button className="btn-ghost" style={{ fontSize: 12, padding: "5px 12px" }} onClick={() => setActiveNav("assignments")}>{t("view_all")}</button>
-                  </div>
-                  {loading ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {[0,1,2].map(i => <div key={i} className="skeleton" style={{ height: 60, borderRadius: 10 }}/>)}
-                    </div>
-                  ) : submissions.length === 0 ? (
-                    <div className="card" style={{ padding: 24, textAlign: "center" }}>
-                      <p style={{ fontSize: 13, color: "#9CA3AF" }}>No submissions yet.</p>
-                    </div>
-                  ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {submissions.slice(0,5).map(s => {
-                        const sc = statusCfg[s.status] || statusCfg.pending;
-                        return (
-                          <div className="sub-row" key={s._id} onClick={() => navigate(`/student/feedback/${s._id}`)}>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <p style={{ fontSize: 13, fontWeight: 500, color: "#1A1D23", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.assignment?.title || "Assignment"}</p>
-                              <p style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>{s.course?.title} · {fmt(s.submittedAt)}</p>
-                            </div>
-                            {s.score != null && <span style={{ fontSize: 13, fontWeight: 700, color: s.score >= 80 ? "#10B981" : s.score >= 60 ? "#F59E0B" : "#EF4444" }}>{s.score}pts</span>}
-                            <span style={{ fontSize: 11, fontWeight: 500, padding: "3px 10px", borderRadius: 6, background: sc.bg, color: sc.color, whiteSpace: "nowrap", flexShrink: 0 }}>
-                              <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: sc.dot, marginRight: 5 }}/>
-                              {sc.label}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </section>
               </div>
 
               {/* Right */}
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {/* AI Panel */}
+                {/* Join Peer Session CTA */}
                 <div style={{ background: "#1A1D23", borderRadius: 16, padding: "20px", color: "#fff" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
                     <div style={{ width: 28, height: 28, borderRadius: 8, background: "#6C63FF22", border: "1px solid #6C63FF44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>◈</div>
@@ -659,66 +667,11 @@ export default function StudentDashboard() {
                     <span style={{ marginLeft: "auto", fontSize: 10, background: "#6C63FF33", color: "#A5A0FF", padding: "2px 8px", borderRadius: 99, fontWeight: 600 }}>LIVE</span>
                   </div>
                   <p style={{ fontSize: 12, color: "#9CA3AF", lineHeight: 1.6, marginBottom: 14 }}>Get instant personalized feedback powered by Claude AI.</p>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <button className="btn-primary" style={{ background: "#6C63FF", padding: "10px 16px", justifyContent: "center", display: "flex" }} onClick={() => navigate("/student/submit")}>
-                      ◈ {t("submit_ai_review")}
-                    </button>
-                    <button className="btn-primary" style={{ background: "#0F6E56", padding: "10px 16px", justifyContent: "center", display: "flex" }} onClick={() => navigate("/student/peer")}>
-                      ⊕ {t("join_peer_session")}
-                    </button>
-                  </div>
+                  <button className="btn-primary" style={{ width: "100%", background: "#0F6E56", padding: "10px 16px", justifyContent: "center", display: "flex" }} onClick={() => navigate("/student/peer")}>
+                    ⊕ {t("join_peer_session")}
+                  </button>
                 </div>
 
-                {/* Recent feedbacks */}
-                <div>
-                  <p className="section-title" style={{ fontSize: 14, marginBottom: 12 }}>{t("recent_feedback")}</p>
-                  {loading ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                      {[0,1].map(i => <div key={i} className="skeleton" style={{ height: 100, borderRadius: 14 }}/>)}
-                    </div>
-                  ) : feedbacks.length === 0 ? (
-                    <div className="card" style={{ padding: 20, textAlign: "center" }}>
-                      <p style={{ fontSize: 13, color: "#9CA3AF" }}>{t("no_feedback_short")}</p>
-                    </div>
-                  ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                      {feedbacks.slice(0,3).map(f => {
-                        const score = f.overallScore || 0;
-                        const color = score >= 85 ? "#10B981" : score >= 70 ? "#F59E0B" : "#EF4444";
-                        return (
-                          <div className="feedback-card" key={f._id} onClick={() => navigate(`/student/feedback/${f.submission?._id || f.submission}`)}>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                              <div style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
-                                <p style={{ fontSize: 12, fontWeight: 600, color: "#1A1D23" }}>
-                                  {f.generatedBy === "claude" ? "🤖 AI Feedback" : "👤 Peer Feedback"}
-                                </p>
-                                <p style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>{fmt(f.createdAt)}</p>
-                              </div>
-                              <div style={{ position: "relative", width: 52, height: 52, flexShrink: 0 }}>
-                                <Ring value={score} color={color}/>
-                                <span style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", fontSize: 12, fontWeight: 700, color: "#1A1D23" }}>{score}</span>
-                              </div>
-                            </div>
-                            {f.summary && <p style={{ fontSize: 12, color: "#4B5563", lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{f.summary}</p>}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* Weekly activity */}
-                <div className="card" style={{ padding: 16 }}>
-                  <p className="section-title" style={{ fontSize: 14, marginBottom: 12 }}>{t("weekly_activity")}</p>
-                  <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 60 }}>
-                    {(stats?.weeklyActivity || [40,70,55,90,65,80,30]).map((h, i) => (
-                      <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                        <div style={{ width: "100%", height: Math.max(4, h * 0.6), background: i === new Date().getDay() - 1 ? "#6C63FF" : "#E5E7EB", borderRadius: 4, transition: "height .5s ease" }}/>
-                        <span style={{ fontSize: 9, color: "#9CA3AF" }}>{"MTWTFSS"[i]}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
               </div>
             </div>
           </>
