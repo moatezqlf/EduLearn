@@ -349,6 +349,12 @@ function registerSessionEvents(io) {
         const session = await Session.findOne({ code: code.toUpperCase() });
         if (!session) return callback({ success: false, message: "Code invalide" });
         if (session.phase === "done") return callback({ success: false, message: "Session terminée" });
+        if (session.isScheduled) {
+          const dateLabel = session.scheduledAt
+            ? new Date(session.scheduledAt).toLocaleString("fr-FR", { dateStyle: "full", timeStyle: "short" })
+            : "une date ultérieure";
+          return callback({ success: false, message: `Session pas encore ouverte — démarrage le ${dateLabel}`, scheduled: true, scheduledAt: session.scheduledAt });
+        }
 
         const sid = session._id.toString();
         const room = `session:${sid}`;

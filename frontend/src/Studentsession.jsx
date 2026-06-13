@@ -210,6 +210,7 @@ export default function StudentSession() {
 
   const [connected, setConnected]     = useState(false);
   const [error, setError]             = useState("");
+  const [scheduledInfo, setScheduledInfo] = useState(null); // { scheduledAt } when session not yet open
 
   // Countdown timer (writing) — updates every second
   useEffect(() => {
@@ -445,7 +446,7 @@ export default function StudentSession() {
 
   const handleJoin = () => {
     if (!code.trim() || !name.trim()) return;
-    setError("");
+    setError(""); setScheduledInfo(null);
 
     socketRef.current.emit("student_join",
       { code: code.trim().toUpperCase(), name: name.trim() },
@@ -456,8 +457,10 @@ export default function StudentSession() {
           joinedRef.current = true;
           setStudentId(res.studentId);
           setSessionId(res.sessionId);
+        } else if (res?.scheduled) {
+          setScheduledInfo({ scheduledAt: res.scheduledAt });
         } else {
-          setError(res?.message || "Failed to join. Check the code.");
+          setError(res?.message || "Code invalide. Vérifiez et réessayez.");
         }
       }
     );
@@ -589,12 +592,26 @@ export default function StudentSession() {
         <h1 style={styles.joinTitle}>Join Session</h1>
         <p style={styles.joinSub}>Enter the code your teacher shared</p>
         {error && <div style={styles.errorBox}>{error}</div>}
-        <input style={styles.joinInput} placeholder="Session Code (e.g. AB12C)" value={code}
-          onChange={e => setCode(e.target.value.toUpperCase())} maxLength={6} />
-        <input style={styles.joinInput} placeholder="Your full name" value={name}
+        {scheduledInfo && (
+          <div style={{ margin: "0 0 16px", padding: "14px 16px", background: "#eef2ff", border: "1.5px solid #c7d2fe", borderRadius: 12, textAlign: "center" }}>
+            <div style={{ fontSize: 22, marginBottom: 6 }}>📅</div>
+            <p style={{ margin: "0 0 4px", fontSize: 14, fontWeight: 700, color: "#4f46e5" }}>Session pas encore ouverte</p>
+            <p style={{ margin: 0, fontSize: 13, color: "#6366f1" }}>
+              Démarrage le <strong>
+                {scheduledInfo.scheduledAt
+                  ? new Date(scheduledInfo.scheduledAt).toLocaleString("fr-FR", { dateStyle: "full", timeStyle: "short" })
+                  : "—"}
+              </strong>
+            </p>
+            <p style={{ margin: "8px 0 0", fontSize: 11, color: "#818cf8" }}>Revenez à l'heure prévue pour rejoindre.</p>
+          </div>
+        )}
+        <input style={styles.joinInput} placeholder="Code de session (ex. AB12C)" value={code}
+          onChange={e => { setCode(e.target.value.toUpperCase()); setScheduledInfo(null); }} maxLength={6} />
+        <input style={styles.joinInput} placeholder="Votre nom complet" value={name}
           onChange={e => setName(e.target.value)} />
         <button style={{ ...styles.joinBtn, opacity: (!code || !name) ? 0.5 : 1 }}
-          onClick={handleJoin} disabled={!code || !name}>Join →</button>
+          onClick={handleJoin} disabled={!code || !name}>Rejoindre →</button>
       </div>
     </div>
   );
