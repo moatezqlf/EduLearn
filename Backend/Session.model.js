@@ -191,7 +191,12 @@ const sessionSchema = new mongoose.Schema({
     language:      { type: String, default: "both" },
   },
 
-  students:     [memberSchema],   // FIX: was duplicated, now single
+  // ── Scheduled session ──
+  scheduledAt:      { type: Date, default: null },
+  isScheduled:      { type: Boolean, default: false },
+  targetStudentIds: [{ type: String }],  // cached at creation for scheduler auto-activation
+
+  students:     [memberSchema],
   groups:       [groupSchema],
   createdBy:    { type: mongoose.Schema.Types.ObjectId, ref: "User" },
 }, { timestamps: true });

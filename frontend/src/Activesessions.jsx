@@ -25,14 +25,32 @@ const timeAgo = (date) => {
   return `Il y a ${Math.floor(mins / 60)} h`;
 };
 
+function formatCountdown(scheduledAt) {
+  const diff = new Date(scheduledAt) - Date.now();
+  if (diff <= 0) return "Bientôt…";
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  if (h > 24) return `Dans ${Math.floor(h / 24)} j ${h % 24} h`;
+  if (h > 0)  return `Dans ${h} h ${m} min`;
+  return `Dans ${m} min`;
+}
+
 export default function Activesessions() {
   useAuth();
   const navigate = useNavigate();
   const { socket } = useSocket();
-  const [sessions, setSessions] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [sessions, setSessions]           = useState([]);
+  const [scheduled, setScheduled]         = useState([]);
+  const [loading, setLoading]             = useState(true);
+  const [, forceUpdate]                   = useState(0);
 
   useEffect(() => { fetchSessions(); }, []);
+
+  // Countdown refresh every minute
+  useEffect(() => {
+    const t = setInterval(() => forceUpdate(n => n + 1), 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     if (!socket) return;
@@ -46,6 +64,8 @@ export default function Activesessions() {
           createdAt: new Date().toISOString(), isNew: true,
         }, ...prev];
       });
+      // Remove from scheduled list if it just went live
+      setScheduled(prev => prev.filter(s => s.code !== data.joinCode));
     });
     return () => socket.off("new_session");
   }, [socket]);
@@ -53,13 +73,12 @@ export default function Activesessions() {
   const fetchSessions = async () => {
     try {
       const token = localStorage.getItem("edulearn_token");
-      const res = await fetch(`${API}/sessions/active`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSessions(data.sessions || []);
-      }
+      const [activeRes, scheduledRes] = await Promise.all([
+        fetch(`${API}/sessions/active`,    { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API}/sessions/scheduled`, { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+      if (activeRes.ok)    setSessions((await activeRes.json()).sessions || []);
+      if (scheduledRes.ok) setScheduled((await scheduledRes.json()).sessions || []);
     } catch (err) {
       console.error("Failed to fetch sessions:", err);
     } finally {
@@ -67,7 +86,7 @@ export default function Activesessions() {
     }
   };
 
-  if (loading || sessions.length === 0) return null;
+  if (loading || (sessions.length === 0 && scheduled.length === 0)) return null;
 
   return (
     <div style={{ marginBottom: 28 }}>
@@ -170,6 +189,66 @@ export default function Activesessions() {
           );
         })}
       </div>
+
+      {/* ── Scheduled (upcoming) sessions ── */}
+      {scheduled.length > 0 && (
+        <div style={{ marginTop: sessions.length > 0 ? 20 : 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <span style={{ fontSize: 15 }}>📅</span>
+            <span style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 15, color: "#1A1D23" }}>Sessions planifiées</span>
+            <span style={{ background: "#EEF2FF", color: "#6366f1", fontSize: 11, fontWeight: 700, padding: "2px 9px", borderRadius: 99 }}>{scheduled.length}</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {scheduled.map(s => {
+              const scheduledDate = new Date(s.scheduledAt);
+              const dateLabel = scheduledDate.toLocaleString("fr-FR", { dateStyle: "full", timeStyle: "short" });
+              const countdown = formatCountdown(s.scheduledAt);
+              const avBg = avatarColor(s.teacher?.name || "T");
+              const initial = (s.teacher?.name || "T").charAt(0).toUpperCase();
+              return (
+                <div key={s.id || s.code} style={{ borderRadius: 16, overflow: "hidden", border: "1.5px solid #c7d2fe", background: "#fff", boxShadow: "0 2px 10px rgba(99,102,241,.06)" }}>
+                  {/* Header */}
+                  <div style={{ background: "#1e1b4b", padding: "12px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 36, height: 36, borderRadius: "50%", background: avBg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff", flexShrink: 0 }}>
+                        {initial}
+                      </div>
+                      <div>
+                        <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#fff" }}>{s.teacher?.name || "Enseignant"}</p>
+                        <p style={{ margin: 0, fontSize: 11, color: "#818cf8" }}>{dateLabel}</p>
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 99, background: "#eef2ff", color: "#6366f1" }}>
+                      {countdown}
+                    </span>
+                  </div>
+                  {/* Body */}
+                  <div style={{ padding: "14px 18px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: ".05em" }}>Code</span>
+                      <span style={{ fontSize: 13, fontWeight: 800, color: "#6C63FF", letterSpacing: "2px", background: "#EEF2FF", padding: "2px 10px", borderRadius: 6 }}>{s.code}</span>
+                      {s.missingSection && (
+                        <>
+                          <span style={{ fontSize: 11, color: "#9CA3AF" }}>·</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b", background: "#fffbeb", padding: "2px 8px", borderRadius: 6, border: "1px solid #fde68a" }}>
+                            📖 Préparer : {s.missingSection}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <p style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 600, color: "#1A1D23", lineHeight: 1.5 }}>
+                      {s.question}
+                    </p>
+                    <div style={{ padding: "8px 12px", background: "#f0f9ff", borderRadius: 8, fontSize: 12, color: "#0369a1", border: "1px solid #bae6fd" }}>
+                      ⏰ La session s'ouvrira automatiquement le <strong>{dateLabel}</strong>. Préparez la section <strong>{s.missingSection || "indiquée"}</strong>.
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes livePulse { 0%,100%{opacity:.4;transform:scale(1)} 50%{opacity:1;transform:scale(1.25)} }

@@ -8,8 +8,8 @@ import http    from "http";
 import express from "express";
 import cors    from "cors";
 import { connectDB } from "./models.js";
-import router        from "./routes.js";
-import { initSocket } from "./Socket.server.js";
+import router, { initScheduler } from "./routes.js";
+import { initSocket }             from "./Socket.server.js";
 await connectDB();
 
 const app    = express();
@@ -26,7 +26,10 @@ app.use((err, req, res, _next) => {
 });
 
 // Init Socket.io — creates io, stores it for getIO(), registers all events
-initSocket(server);
+const io = initSocket(server);
+
+// Start scheduled-session watcher
+initScheduler(io);
 
 server.listen(process.env.PORT || 5000, () =>
   console.log(`EduLearn API + Socket.io → http://localhost:${process.env.PORT || 5000}`)

@@ -1127,6 +1127,11 @@ router.post("/sessions/create", auth, role("teacher", "admin"), uploadSessionMed
     const { question, instructions, examples, criteria, sessionConfig } = req.body;
     if (!question?.trim()) return res.status(400).json({ message: "question required" });
 
+    // Scheduled session support
+    const scheduledAtRaw = req.body.scheduledAt;
+    const scheduledAt = scheduledAtRaw ? new Date(scheduledAtRaw) : null;
+    const isScheduled = !!(scheduledAt && scheduledAt > new Date());
+
     let code, attempts = 0;
     do {
       code = Math.random().toString(36).slice(2, 7).toUpperCase();
@@ -1172,6 +1177,8 @@ router.post("/sessions/create", auth, role("teacher", "admin"), uploadSessionMed
       currentSectionKey:   missingSection || selectedSections[0] || "",
       totalRounds: 1,
       currentRound: 1,
+      scheduledAt:  isScheduled ? scheduledAt : null,
+      isScheduled:  !!isScheduled,
     });
 
     // Notify students enrolled in teacher's courses, filtered by spécialité if set
@@ -1196,65 +1203,118 @@ router.post("/sessions/create", auth, role("teacher", "admin"), uploadSessionMed
       )];
       notifiedCount = studentIds.length;
 
+      // Cache student IDs in session for scheduler auto-activation
+      if (isScheduled && studentIds.length > 0) {
+        await Session.findByIdAndUpdate(session._id, { targetStudentIds: studentIds });
+      }
+
       if (studentIds.length > 0 && teacher) {
-        const notificationDocs = studentIds.map(studentId => ({
-          userId:      studentId,
-          teacherName: teacher.name,
-          question:    question.trim(),
-          joinCode:    code,
-          read:        false,
-        }));
-        await Notification.insertMany(notificationDocs);
-
-        const io = getIO();
-        const payload = { teacherName: teacher.name, question: question.trim(), joinCode: code };
-        for (const studentId of studentIds) {
-          io.to(studentId).emit("new_session", payload);
-        }
-
-        // Send email notifications — fetch student emails in bulk
-        const studentDocs = await User.find({ _id: { $in: studentIds } }).select("email name").lean();
         const appUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-        const startedAt = new Date().toLocaleString("fr-FR", { dateStyle: "full", timeStyle: "short" });
-        for (const st of studentDocs) {
-          if (!st.email) continue;
-          sendEmail({
-            to: st.email,
-            subject: `📚 Nouvelle session disponible — ${teacher.name}`,
-            html: `
-              <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px;background:#f7f8fc;border-radius:12px;">
-                <div style="background:#1a1d23;border-radius:10px;padding:20px 24px;color:#fff;margin-bottom:20px;">
-                  <p style="margin:0 0 4px;font-size:12px;color:#9ca3af;">Session pairs — EduLearn</p>
-                  <h2 style="margin:0;font-size:20px;font-weight:700;">${teacher.name} vous invite</h2>
-                </div>
-                <div style="background:#fff;border-radius:10px;padding:20px 24px;border:1px solid #eaecf0;margin-bottom:16px;">
-                  <p style="margin:0 0 8px;font-size:12px;color:#9ca3af;text-transform:uppercase;font-weight:600;">Sujet de la session</p>
-                  <p style="margin:0;font-size:16px;color:#1a1d23;font-weight:600;line-height:1.5;">${question.trim()}</p>
-                </div>
-                <div style="background:#fff;border-radius:10px;padding:16px 24px;border:1px solid #eaecf0;margin-bottom:20px;display:flex;gap:24px;">
-                  <div>
-                    <p style="margin:0 0 4px;font-size:11px;color:#9ca3af;font-weight:600;">CODE DE REJOINDRE</p>
-                    <p style="margin:0;font-size:24px;font-weight:800;color:#6c63ff;letter-spacing:3px;">${code}</p>
+        const studentDocs = await User.find({ _id: { $in: studentIds } }).select("email name").lean();
+
+        if (isScheduled) {
+          // ── Scheduled session: send announcement email, no live socket event ──
+          const scheduledLabel = scheduledAt.toLocaleString("fr-FR", { dateStyle: "full", timeStyle: "short" });
+          const missingSection = session.missingSection || "";
+          for (const st of studentDocs) {
+            if (!st.email) continue;
+            sendEmail({
+              to: st.email,
+              subject: `📅 Session planifiée — ${teacher.name}`,
+              html: `
+                <div style="font-family:sans-serif;max-width:540px;margin:0 auto;padding:24px;background:#f7f8fc;border-radius:12px;">
+                  <div style="background:#1a1d23;border-radius:10px;padding:20px 24px;color:#fff;margin-bottom:20px;">
+                    <p style="margin:0 0 4px;font-size:12px;color:#9ca3af;">Session planifiée — EduLearn</p>
+                    <h2 style="margin:0;font-size:20px;font-weight:700;">${teacher.name} a planifié une session</h2>
                   </div>
-                  <div>
-                    <p style="margin:0 0 4px;font-size:11px;color:#9ca3af;font-weight:600;">LANCÉE LE</p>
-                    <p style="margin:0;font-size:13px;font-weight:600;color:#1a1d23;">${startedAt}</p>
+                  <div style="background:#eef2ff;border-radius:10px;padding:16px 20px;border:1.5px solid #c7d2fe;margin-bottom:16px;text-align:center;">
+                    <p style="margin:0 0 4px;font-size:11px;color:#6366f1;font-weight:700;text-transform:uppercase;letter-spacing:.05em;">📅 Date de la session</p>
+                    <p style="margin:0;font-size:20px;font-weight:800;color:#1a1d23;">${scheduledLabel}</p>
                   </div>
-                </div>
-                <a href="${appUrl}/student/peer" style="display:block;background:#6c63ff;color:#fff;text-align:center;padding:13px;border-radius:9px;text-decoration:none;font-weight:700;font-size:14px;">
-                  ◈ Rejoindre la session →
-                </a>
-                <p style="margin:16px 0 0;font-size:11px;color:#9ca3af;text-align:center;">EduLearn — Plateforme d'apprentissage collaboratif</p>
-              </div>`,
-          }).catch(e => console.error("[Session email]", e.message));
+                  <div style="background:#fff;border-radius:10px;padding:16px 20px;border:1px solid #eaecf0;margin-bottom:16px;">
+                    <p style="margin:0 0 6px;font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase;">Sujet</p>
+                    <p style="margin:0;font-size:15px;color:#1a1d23;font-weight:600;line-height:1.5;">${question.trim()}</p>
+                  </div>
+                  <div style="display:flex;gap:12px;margin-bottom:20px;">
+                    <div style="flex:1;background:#fff;border-radius:10px;padding:14px 16px;border:1px solid #eaecf0;">
+                      <p style="margin:0 0 4px;font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase;">Code session</p>
+                      <p style="margin:0;font-size:22px;font-weight:800;color:#6c63ff;letter-spacing:3px;">${code}</p>
+                    </div>
+                    ${missingSection ? `<div style="flex:1;background:#fff;border-radius:10px;padding:14px 16px;border:1px solid #eaecf0;">
+                      <p style="margin:0 0 4px;font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase;">Section à préparer</p>
+                      <p style="margin:0;font-size:15px;font-weight:800;color:#f59e0b;">${missingSection}</p>
+                    </div>` : ""}
+                  </div>
+                  <div style="background:#f0fdf4;border-radius:10px;padding:12px 16px;border:1px solid #bbf7d0;margin-bottom:20px;font-size:12px;color:#166534;">
+                    💡 Préparez la section <strong>${missingSection || "indiquée"}</strong> avant la session. Un rappel vous sera envoyé à l'ouverture.
+                  </div>
+                  <a href="${appUrl}/student" style="display:block;background:#6c63ff;color:#fff;text-align:center;padding:13px;border-radius:9px;text-decoration:none;font-weight:700;font-size:14px;">
+                    Voir mes sessions →
+                  </a>
+                  <p style="margin:16px 0 0;font-size:11px;color:#9ca3af;text-align:center;">EduLearn — Plateforme d'apprentissage collaboratif</p>
+                </div>`,
+            }).catch(e => console.error("[Scheduled email]", e.message));
+          }
+        } else {
+          // ── Instant session: live socket + email ──
+          const notificationDocs = studentIds.map(studentId => ({
+            userId:      studentId,
+            teacherName: teacher.name,
+            question:    question.trim(),
+            joinCode:    code,
+            read:        false,
+          }));
+          await Notification.insertMany(notificationDocs);
+
+          const io = getIO();
+          const payload = { teacherName: teacher.name, question: question.trim(), joinCode: code };
+          for (const studentId of studentIds) {
+            io.to(studentId).emit("new_session", payload);
+          }
+
+          const startedAt = new Date().toLocaleString("fr-FR", { dateStyle: "full", timeStyle: "short" });
+          for (const st of studentDocs) {
+            if (!st.email) continue;
+            sendEmail({
+              to: st.email,
+              subject: `📚 Nouvelle session disponible — ${teacher.name}`,
+              html: `
+                <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px;background:#f7f8fc;border-radius:12px;">
+                  <div style="background:#1a1d23;border-radius:10px;padding:20px 24px;color:#fff;margin-bottom:20px;">
+                    <p style="margin:0 0 4px;font-size:12px;color:#9ca3af;">Session pairs — EduLearn</p>
+                    <h2 style="margin:0;font-size:20px;font-weight:700;">${teacher.name} vous invite</h2>
+                  </div>
+                  <div style="background:#fff;border-radius:10px;padding:20px 24px;border:1px solid #eaecf0;margin-bottom:16px;">
+                    <p style="margin:0 0 8px;font-size:12px;color:#9ca3af;text-transform:uppercase;font-weight:600;">Sujet de la session</p>
+                    <p style="margin:0;font-size:16px;color:#1a1d23;font-weight:600;line-height:1.5;">${question.trim()}</p>
+                  </div>
+                  <div style="background:#fff;border-radius:10px;padding:16px 24px;border:1px solid #eaecf0;margin-bottom:20px;display:flex;gap:24px;">
+                    <div>
+                      <p style="margin:0 0 4px;font-size:11px;color:#9ca3af;font-weight:600;">CODE DE REJOINDRE</p>
+                      <p style="margin:0;font-size:24px;font-weight:800;color:#6c63ff;letter-spacing:3px;">${code}</p>
+                    </div>
+                    <div>
+                      <p style="margin:0 0 4px;font-size:11px;color:#9ca3af;font-weight:600;">LANCÉE LE</p>
+                      <p style="margin:0;font-size:13px;font-weight:600;color:#1a1d23;">${startedAt}</p>
+                    </div>
+                  </div>
+                  <a href="${appUrl}/student/peer" style="display:block;background:#6c63ff;color:#fff;text-align:center;padding:13px;border-radius:9px;text-decoration:none;font-weight:700;font-size:14px;">
+                    ◈ Rejoindre la session →
+                  </a>
+                  <p style="margin:16px 0 0;font-size:11px;color:#9ca3af;text-align:center;">EduLearn — Plateforme d'apprentissage collaboratif</p>
+                </div>`,
+            }).catch(e => console.error("[Session email]", e.message));
+          }
         }
       }
     } catch (e) {
-      // Notification failure should not block session creation
       console.error("Notify followers failed:", e.message);
     }
 
-    res.status(201).json({ success: true, code, sessionId: session._id, notifiedCount });
+    res.status(201).json({
+      success: true, code, sessionId: session._id, notifiedCount,
+      scheduled: isScheduled, scheduledAt: isScheduled ? scheduledAt : null,
+    });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
@@ -1618,5 +1678,92 @@ router.post("/sessions/:sessionId/peer-review", auth, async (req, res) => {
 });
 
 registerExtraRoutes(router, { auth, role });
+
+// ── GET /api/sessions/scheduled — upcoming scheduled sessions for a student ──
+router.get("/sessions/scheduled", auth, async (req, res) => {
+  try {
+    const sessions = await Session.find({
+      isScheduled: true,
+      targetStudentIds: req.user.id,
+      scheduledAt: { $gt: new Date() },
+    })
+      .populate("createdBy", "name")
+      .select("code question missingSection scheduledAt createdBy targetSpecialites")
+      .sort({ scheduledAt: 1 })
+      .lean();
+
+    res.json({
+      sessions: sessions.map(s => ({
+        id:            s._id,
+        code:          s.code,
+        question:      s.question,
+        missingSection: s.missingSection,
+        scheduledAt:   s.scheduledAt,
+        teacher:       s.createdBy,
+      })),
+    });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// ── Scheduler: auto-activate sessions when scheduledAt is reached ─────────────
+export async function initScheduler(io) {
+  const activate = async () => {
+    try {
+      const due = await Session.find({
+        isScheduled: true,
+        scheduledAt: { $lte: new Date() },
+      }).populate("createdBy", "name").lean();
+
+      for (const session of due) {
+        await Session.findByIdAndUpdate(session._id, { isScheduled: false });
+
+        const teacherName = session.createdBy?.name || "Enseignant";
+        const payload = { teacherName, question: session.question, joinCode: session.code };
+
+        // Notify via socket (students connected at launch time)
+        for (const studentId of session.targetStudentIds || []) {
+          io.to(studentId).emit("new_session", payload);
+        }
+
+        // Send "now live" reminder email
+        const appUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+        const studentDocs = await User.find({ _id: { $in: session.targetStudentIds || [] } })
+          .select("email name").lean();
+        for (const st of studentDocs) {
+          if (!st.email) continue;
+          sendEmail({
+            to: st.email,
+            subject: `🔔 La session commence maintenant — ${teacherName}`,
+            html: `
+              <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px;background:#f7f8fc;border-radius:12px;">
+                <div style="background:#1a1d23;border-radius:10px;padding:20px 24px;color:#fff;margin-bottom:20px;">
+                  <p style="margin:0 0 4px;font-size:12px;color:#10b981;">🔴 EN DIRECT</p>
+                  <h2 style="margin:0;font-size:20px;font-weight:700;">La session de ${teacherName} commence !</h2>
+                </div>
+                <div style="background:#fff;border-radius:10px;padding:16px 20px;border:1px solid #eaecf0;margin-bottom:20px;">
+                  <p style="margin:0 0 4px;font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase;">Code pour rejoindre</p>
+                  <p style="margin:0;font-size:28px;font-weight:800;color:#6c63ff;letter-spacing:4px;">${session.code}</p>
+                </div>
+                <a href="${appUrl}/student/peer" style="display:block;background:#10b981;color:#fff;text-align:center;padding:14px;border-radius:9px;text-decoration:none;font-weight:700;font-size:15px;">
+                  ◈ Rejoindre maintenant →
+                </a>
+                <p style="margin:16px 0 0;font-size:11px;color:#9ca3af;text-align:center;">EduLearn — Plateforme d'apprentissage collaboratif</p>
+              </div>`,
+          }).catch(e => console.error("[Live reminder email]", e.message));
+        }
+
+        console.log(`[Scheduler] Session ${session.code} activated`);
+      }
+    } catch (e) {
+      console.error("[Scheduler] Error:", e.message);
+    }
+  };
+
+  // Run immediately on start (catch sessions that should have started during downtime)
+  await activate();
+  // Then every 30 seconds
+  setInterval(activate, 30_000);
+  console.log("[Scheduler] Scheduled session watcher started");
+}
 
 export default router;

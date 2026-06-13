@@ -221,6 +221,9 @@ export default function TeacherSession() {
   const [articleTextContent, setArticleTextContent]     = useState("");
   const [articleCutterOpen, setArticleCutterOpen]       = useState(false);
   const [sectionTimings, setSectionTimings]             = useState({}); // { "Introduction": 30 } (minutes)
+  const [scheduleMode, setScheduleMode]                 = useState(false);
+  const [scheduledAt, setScheduledAt]                   = useState("");   // ISO datetime-local string
+  const [scheduledConfirm, setScheduledConfirm]         = useState(null); // { code, scheduledAt, notifiedCount }
 
   const toggleSection = (name) => {
     setSelectedSections(prev =>
@@ -403,6 +406,7 @@ export default function TeacherSession() {
       if (articleTextContent) formData.append("articleTextContent", articleTextContent);
       if (videoFile) formData.append("video", videoFile);
       if (articleFile) formData.append("article", articleFile);
+      if (scheduleMode && scheduledAt) formData.append("scheduledAt", new Date(scheduledAt).toISOString());
 
       const token = localStorage.getItem("edulearn_token");
       const res = await fetch(`${API_URL}/sessions/create`, {
@@ -419,6 +423,16 @@ export default function TeacherSession() {
 
       const data = await res.json();
       console.log("Session created:", data);
+
+      if (data.scheduled) {
+        // Scheduled: show confirmation, teacher can close/disconnect
+        setScheduledConfirm({
+          code: data.code,
+          scheduledAt: data.scheduledAt,
+          notifiedCount: data.notifiedCount,
+        });
+        return;
+      }
 
       const newSessionId = data.sessionId;
       setSessionCode(data.code);
@@ -790,17 +804,73 @@ export default function TeacherSession() {
                 </div>
               )}
 
-              <div style={styles.wizardNav}>
-                <button type="button" style={styles.btnGhost} onClick={() => setSetupStep(1)}>← Retour</button>
-                <button
-                  type="button"
-                  style={{ ...styles.btn, marginTop: 0, flex: 1, opacity: (!missingSection || !articleFile || loading) ? 0.5 : 1 }}
-                  disabled={!missingSection || !articleFile || loading}
-                  onClick={handleCreateSession}
-                >
-                  {loading ? "Création…" : "🚀 Lancer la session →"}
-                </button>
+              {/* ── Scheduled confirmation view ── */}
+              {scheduledConfirm ? (
+                <div style={{ margin: "20px 0", padding: "24px", background: "#eef2ff", borderRadius: 14, border: "2px solid #c7d2fe", textAlign: "center" }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>📅</div>
+                  <h3 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 800, color: "#1e293b" }}>Session planifiée !</h3>
+                  <p style={{ margin: "0 0 16px", fontSize: 13, color: "#6366f1" }}>
+                    {new Date(scheduledConfirm.scheduledAt).toLocaleString("fr-FR", { dateStyle: "full", timeStyle: "short" })}
+                  </p>
+                  <div style={{ display: "inline-block", background: "#fff", borderRadius: 10, padding: "10px 24px", border: "1.5px solid #c7d2fe", marginBottom: 14 }}>
+                    <p style={{ margin: "0 0 2px", fontSize: 11, color: "#9ca3af", fontWeight: 600 }}>CODE SESSION</p>
+                    <p style={{ margin: 0, fontSize: 26, fontWeight: 800, color: "#6c63ff", letterSpacing: "4px" }}>{scheduledConfirm.code}</p>
+                  </div>
+                  <p style={{ margin: "0 0 20px", fontSize: 12, color: "#64748b" }}>
+                    {scheduledConfirm.notifiedCount} étudiant{scheduledConfirm.notifiedCount !== 1 ? "s" : ""} notifié{scheduledConfirm.notifiedCount !== 1 ? "s" : ""} par email · La session s'activera automatiquement à l'heure prévue.
+                  </p>
+                  <button type="button" onClick={() => { setScheduledConfirm(null); setScheduleMode(false); setScheduledAt(""); }} style={{ padding: "9px 20px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                    Programmer une autre session
+                  </button>
+                </div>
+              ) : (
+              <div style={{ marginTop: 20 }}>
+                {/* Mode toggle */}
+                <div style={{ display: "flex", gap: 0, marginBottom: 14, border: "1.5px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
+                  {[{ id: false, icon: "🚀", label: "Lancer maintenant" }, { id: true, icon: "📅", label: "Programmer" }].map(m => (
+                    <button key={String(m.id)} type="button" onClick={() => setScheduleMode(m.id)} style={{
+                      flex: 1, padding: "10px 0", border: "none", cursor: "pointer", fontFamily: "inherit",
+                      fontWeight: 700, fontSize: 13, transition: "all .15s",
+                      background: scheduleMode === m.id ? "#6366f1" : "#f8fafc",
+                      color: scheduleMode === m.id ? "#fff" : "#64748b",
+                    }}>
+                      {m.icon} {m.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Date picker (only in schedule mode) */}
+                {scheduleMode && (
+                  <div style={{ marginBottom: 14, padding: "14px 16px", background: "#eef2ff", borderRadius: 10, border: "1.5px solid #c7d2fe" }}>
+                    <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#6366f1", marginBottom: 8 }}>
+                      📅 Date et heure de lancement
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={scheduledAt}
+                      min={new Date(Date.now() + 5 * 60 * 1000).toISOString().slice(0, 16)}
+                      onChange={e => setScheduledAt(e.target.value)}
+                      style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 8, border: "1.5px solid #c7d2fe", fontSize: 14, fontFamily: "inherit", outline: "none", background: "#fff", color: "#1e293b" }}
+                    />
+                    <p style={{ margin: "6px 0 0", fontSize: 11, color: "#6366f1" }}>
+                      Les étudiants recevront un email d'annonce immédiatement + un rappel au lancement.
+                    </p>
+                  </div>
+                )}
+
+                <div style={styles.wizardNav}>
+                  <button type="button" style={styles.btnGhost} onClick={() => setSetupStep(1)}>← Retour</button>
+                  <button
+                    type="button"
+                    style={{ ...styles.btn, marginTop: 0, flex: 1, opacity: (!missingSection || !articleFile || loading || (scheduleMode && !scheduledAt)) ? 0.5 : 1 }}
+                    disabled={!missingSection || !articleFile || loading || (scheduleMode && !scheduledAt)}
+                    onClick={handleCreateSession}
+                  >
+                    {loading ? "Création…" : scheduleMode ? "📅 Programmer la session" : "🚀 Lancer la session →"}
+                  </button>
+                </div>
               </div>
+              )}
             </div>
             )}
             </>
