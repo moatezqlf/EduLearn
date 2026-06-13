@@ -26,13 +26,23 @@ function splitArticle(text) {
   for (const line of lines) {
     const trimmed = line.trim();
     let matched = false;
-    // Only test potential section headers: short lines (≤80 chars), not mid-sentence
-    if (trimmed.length >= 3 && trimmed.length <= 80 && !/[,;]/.test(trimmed)) {
-      for (const [section, pattern] of Object.entries(SECTION_PATTERNS)) {
-        if (section !== "title" && pattern.test(trimmed)) {
+
+    if (trimmed.length >= 2) {
+      for (const [section, pat] of Object.entries(SECTION_PATTERNS)) {
+        if (section === "title") continue;
+        const m = pat.exec(trimmed);
+        if (!m) continue;
+
+        // Accept: short standalone header line OR keyword starting at position 0 (inline header)
+        const isStandalone = trimmed.length <= 100 && !/[,;]/.test(trimmed);
+        const isInline = m.index === 0;
+
+        if (isStandalone || isInline) {
           sections[currentSection] = buffer.join("\n").trim();
           currentSection = section;
-          buffer = [];
+          // For inline headers ("Abstract Lorem ipsum…"), capture text after the keyword
+          const afterKw = trimmed.slice(m.index + m[0].length).replace(/^[\s:\-–—]+/, "");
+          buffer = afterKw.length > 3 ? [afterKw] : [];
           matched = true;
           break;
         }
@@ -41,6 +51,50 @@ function splitArticle(text) {
     if (!matched) buffer.push(line);
   }
   sections[currentSection] = buffer.join("\n").trim();
+
+  // Fallback: if everything stayed in "title" (no sections found), try position search
+  const hasExtra = Object.keys(sections).some(k => k !== "title" && (sections[k]?.trim().length ?? 0) > 20);
+  if (!hasExtra && text.length > 300) {
+    return splitArticleByPosition(text);
+  }
+
+  return sections;
+}
+
+// Position-based fallback using detectSectionInText — handles flowing PDF text
+function splitArticleByPosition(text) {
+  const searches = [
+    { key: "abstract",     names: ["Abstract", "Résumé", "Summary"] },
+    { key: "introduction", names: ["Introduction"] },
+    { key: "methods",      names: ["Méthodes", "Methods", "Méthodologie"] },
+    { key: "results",      names: ["Résultats", "Results"] },
+    { key: "discussion",   names: ["Discussion"] },
+    { key: "conclusion",   names: ["Conclusion"] },
+  ];
+
+  const found = [];
+  for (const { key, names } of searches) {
+    for (const name of names) {
+      const pos = detectSectionInText(text, name);
+      if (pos !== null) { found.push({ key, pos, name }); break; }
+    }
+  }
+
+  if (found.length === 0) return { title: text };
+  found.sort((a, b) => a.pos - b.pos);
+
+  const sections = {};
+  sections.title = text.slice(0, found[0].pos).trim();
+
+  for (let i = 0; i < found.length; i++) {
+    const { key, pos, name } = found[i];
+    const end = i + 1 < found.length ? found[i + 1].pos : text.length;
+    const headerEnd = pos + name.length;
+    const nlAfter = text.indexOf("\n", pos);
+    const contentStart = (nlAfter !== -1 && nlAfter <= headerEnd + 15) ? nlAfter + 1 : headerEnd;
+    sections[key] = text.slice(Math.min(contentStart, end), end).trim();
+  }
+
   return sections;
 }
 
@@ -530,33 +584,38 @@ export default function ArticleCutterTool({
         {/* Auto-detected sections panel */}
         {Object.keys(detectedSections).length > 0 && (
           <div style={{ ...s.sideBlock, background: "#f0fdf4", borderLeft: "3px solid #22c55e" }}>
-            <div style={{ ...s.sideLabel, color: "#15803d" }}>✅ Sections détectées</div>
+            <div style={{ ...s.sideLabel, color: "#15803d" }}>
+              ✅ {Object.keys(detectedSections).length} section{Object.keys(detectedSections).length > 1 ? "s" : ""} détectée{Object.keys(detectedSections).length > 1 ? "s" : ""}
+            </div>
             <p style={{ fontSize: 11, color: "#166534", margin: "0 0 10px", lineHeight: 1.4 }}>
               Cliquez sur une section pour la sélectionner comme section à cacher.
             </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {Object.entries(detectedSections).map(([key, content]) => {
                 const label = SECTION_PATTERN_LABELS[key] || key;
+                const color = SECTION_COLORS[label] || "#22c55e";
                 const isSel = missingSection === label;
-                const previewLen = Math.min(content.length, 60);
+                const wordCount = content.split(/\s+/).filter(Boolean).length;
+                const preview = content.replace(/\n+/g, " ").trim().slice(0, 90);
                 return (
                   <button
                     key={key}
                     type="button"
                     onClick={() => onMissingChange?.(label)}
                     style={{
-                      textAlign: "left", padding: "7px 10px", borderRadius: 8, cursor: "pointer",
-                      border: isSel ? "2px solid #16a34a" : "1.5px solid #d1fae5",
-                      background: isSel ? "#dcfce7" : "#fff",
-                      color: isSel ? "#15803d" : "#374151",
+                      textAlign: "left", padding: "9px 11px", borderRadius: 9, cursor: "pointer",
+                      border: isSel ? `2px solid ${color}` : "1.5px solid #d1fae5",
+                      background: isSel ? `${color}15` : "#fff",
+                      color: isSel ? color : "#374151",
                     }}
                   >
-                    <div style={{ fontWeight: 700, fontSize: 12 }}>{label}</div>
-                    <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-                      {content.slice(0, previewLen)}{content.length > previewLen ? "…" : ""}
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, display: "inline-block", flexShrink: 0 }} />
+                      <span style={{ fontWeight: 800, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</span>
+                      <span style={{ fontSize: 10, color: "#9ca3af", marginLeft: "auto" }}>{wordCount} mots</span>
                     </div>
-                    <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>
-                      {content.split(/\s+/).length} mots
+                    <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.45 }}>
+                      {preview}{content.length > 90 ? "…" : ""}
                     </div>
                   </button>
                 );
@@ -761,7 +820,7 @@ export default function ArticleCutterTool({
               <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 600 }}>✓ Texte structuré</span>
             </div>
             {/* Section cards */}
-            <div style={{ maxHeight: 400, overflowY: "auto" }}>
+            <div style={{ maxHeight: 600, overflowY: "auto" }}>
               {SECTION_ORDER_KEYS.filter(k => structuredSections[k]?.trim()).map(key => {
                 const label = SECTION_LABELS_MAP[key] || key;
                 const color = SECTION_COLORS[label] || "#6366f1";
@@ -769,21 +828,26 @@ export default function ArticleCutterTool({
                 const words = content.split(/\s+/).filter(Boolean).length;
                 const isMissing = missingSection === label;
                 return (
-                  <div key={key} style={{ borderBottom: "1px solid #f1f5f9", padding: "14px 16px", background: isMissing ? `${color}08` : "#fff", cursor: "pointer", transition: "background .15s" }}
+                  <div key={key} style={{ borderBottom: `2px solid ${isMissing ? color : "#f1f5f9"}`, padding: "16px 18px", background: isMissing ? `${color}08` : "#fff", cursor: "pointer", transition: "background .15s" }}
                     onClick={() => { onMissingChange?.(label); }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                      <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: color, flexShrink: 0 }} />
-                      <span style={{ fontSize: 13, fontWeight: 800, color: isMissing ? color : "#1e293b" }}>{label}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                      <span style={{ display: "inline-block", width: 12, height: 12, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                      <span style={{ fontSize: 14, fontWeight: 800, color: isMissing ? color : "#1e293b", textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</span>
                       <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: 4 }}>{words} mots</span>
                       {isMissing && (
-                        <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: "#fff", background: color, padding: "2px 8px", borderRadius: 999 }}>
-                          ✂️ À découper
+                        <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "#fff", background: color, padding: "3px 10px", borderRadius: 999 }}>
+                          ✂️ Sélectionné
                         </span>
                       )}
                     </div>
-                    <p style={{ margin: 0, fontSize: 12, color: "#374151", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                      {content}
-                    </p>
+                    <div style={{ fontSize: 12, color: "#374151", lineHeight: 1.7, maxHeight: 160, overflowY: "auto", paddingRight: 4, borderLeft: `3px solid ${color}30`, paddingLeft: 10, marginLeft: 2 }}>
+                      {content.split("\n").filter(l => l.trim()).slice(0, 12).map((line, i) => (
+                        <p key={i} style={{ margin: "0 0 4px" }}>{line.trim()}</p>
+                      ))}
+                      {content.split("\n").filter(l => l.trim()).length > 12 && (
+                        <p style={{ margin: 0, color: "#94a3b8", fontStyle: "italic" }}>… ({content.split("\n").filter(l => l.trim()).length - 12} lignes de plus)</p>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -796,7 +860,7 @@ export default function ArticleCutterTool({
                       <span style={{ fontSize: 13, fontWeight: 800, color: "#64748b" }}>{key}</span>
                       <span style={{ fontSize: 11, color: "#94a3b8" }}>{words} mots</span>
                     </div>
-                    <p style={{ margin: 0, fontSize: 12, color: "#374151", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                    <p style={{ margin: 0, fontSize: 12, color: "#374151", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
                       {content.trim()}
                     </p>
                   </div>
