@@ -1057,6 +1057,15 @@ export default function TeacherSession() {
               setArticleTextContent(visibleText);
               if (removed && section) {
                 setArticleSections(prev => ({ ...prev, [section]: removed }));
+                // If session already created, sync hidden section content to backend for scaffolding
+                if (sessionId) {
+                  const token = localStorage.getItem("edulearn_token");
+                  fetch(`${API_URL}/sessions/${sessionId}/article-sections`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                    body: JSON.stringify({ sectionKey: section, content: removed }),
+                  }).catch(console.error);
+                }
               }
               setActivityMode("section_learn");
               setArticleCutterOpen(false);

@@ -1620,6 +1620,27 @@ router.patch("/notifications/read-all", auth, async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────
+//  Patch articleSections d'une session active (depuis ArticleCutterTool)
+// ──────────────────────────────────────────────────────────────
+router.patch("/sessions/:sessionId/article-sections", auth, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { sectionKey, content } = req.body;
+    if (!sectionKey || !content) return res.status(400).json({ message: "sectionKey et content requis" });
+    const session = await Session.findOneAndUpdate(
+      { _id: sessionId, createdBy: req.user.id },
+      { $set: { [`articleSections.${sectionKey}`]: content.trim() } },
+      { new: true }
+    );
+    if (!session) return res.status(404).json({ message: "Session introuvable" });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[Patch articleSections]", err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────
 //  Scaffolding adaptatif — génération IA par mode
 // ──────────────────────────────────────────────────────────────
 router.post("/scaffolding/generate", auth, async (req, res) => {
@@ -1633,39 +1654,34 @@ router.post("/scaffolding/generate", auth, async (req, res) => {
 
     // Contenu original de la section (jamais envoyé directement au student)
     const originalContent = (session.articleSections?.[sectionKey] || "").trim();
-    if (!originalContent) {
-      return res.status(422).json({ message: `Contenu original de la section « ${sectionKey} » non disponible. Le scaffolding fonctionne uniquement avec des articles textuels (non PDF scanné).` });
-    }
+    const hasContent = originalContent.length > 0;
+    const excerpt = hasContent ? originalContent.slice(0, 2500) : null;
 
-    const excerpt = originalContent.slice(0, 2500); // limite tokens
+    const sourceBlock = hasContent
+      ? `\n\nCONTENU CONFIDENTIEL DE LA SECTION :\n${excerpt}`
+      : `\n\n(Aucun texte source fourni — génère un scaffolding académique standard pour une section « ${sectionKey} » d'article scientifique en français.)`;
 
     const PROMPTS = {
       questions: `Tu es un assistant pédagogique spécialisé en rédaction académique.
-À partir du contenu CONFIDENTIEL de la section « ${sectionKey} » ci-dessous, génère exactement 5 questions progressives (du général au spécifique) pour guider un étudiant dans la rédaction de cette section.
-RÈGLES : Ne révèle JAMAIS le contenu original. Chaque question doit inclure un "hint" court (1 phrase).
+Génère exactement 5 questions progressives (du général au spécifique) pour guider un étudiant dans la rédaction de la section « ${sectionKey} » d'un article scientifique.
+RÈGLES :${hasContent ? " Ne révèle JAMAIS le contenu original." : ""} Chaque question doit inclure un "hint" court (1 phrase). Questions en français.
 Réponds UNIQUEMENT avec du JSON valide, sans texte autour :
 {"items":[{"id":1,"question":"...","hint":"..."},{"id":2,"question":"...","hint":"..."},{"id":3,"question":"...","hint":"..."},{"id":4,"question":"...","hint":"..."},{"id":5,"question":"...","hint":"..."}]}
-
-CONTENU CONFIDENTIEL :
-${excerpt}`,
+${sourceBlock}`,
 
       starters: `Tu es un assistant pédagogique spécialisé en rédaction académique.
-À partir du contenu CONFIDENTIEL de la section « ${sectionKey} » ci-dessous, génère exactement 6 amorces de phrases en français académique couvrant les idées clés. L'étudiant les complètera lui-même.
-RÈGLES : Ne copie PAS de phrases entières du texte. Chaque amorce a un "purpose" court (3-5 mots).
+Génère exactement 6 amorces de phrases en français académique pour aider un étudiant à rédiger la section « ${sectionKey} » d'un article scientifique. L'étudiant les complètera lui-même.
+RÈGLES :${hasContent ? " Ne copie PAS de phrases entières du texte source." : ""} Chaque amorce a un "purpose" court (3-5 mots).
 Réponds UNIQUEMENT avec du JSON valide :
 {"items":[{"id":1,"starter":"...","purpose":"..."},{"id":2,"starter":"...","purpose":"..."},{"id":3,"starter":"...","purpose":"..."},{"id":4,"starter":"...","purpose":"..."},{"id":5,"starter":"...","purpose":"..."},{"id":6,"starter":"...","purpose":"..."}]}
-
-CONTENU CONFIDENTIEL :
-${excerpt}`,
+${sourceBlock}`,
 
       template: `Tu es un assistant pédagogique spécialisé en rédaction académique.
-À partir du contenu CONFIDENTIEL de la section « ${sectionKey} » ci-dessous, génère un plan structuré en 4 étapes pour rédiger cette section.
-RÈGLES : Chaque étape a un "step" (titre), une "instruction" claire et un "example" concret FICTIF (pas copié du texte).
+Génère un plan structuré en 4 étapes pour rédiger la section « ${sectionKey} » d'un article scientifique.
+RÈGLES : Chaque étape a un "step" (titre court), une "instruction" claire et un "example" concret FICTIF (jamais copié du texte).
 Réponds UNIQUEMENT avec du JSON valide :
 {"items":[{"id":1,"step":"Étape 1 — ...","instruction":"...","example":"..."},{"id":2,"step":"Étape 2 — ...","instruction":"...","example":"..."},{"id":3,"step":"Étape 3 — ...","instruction":"...","example":"..."},{"id":4,"step":"Étape 4 — ...","instruction":"...","example":"..."}]}
-
-CONTENU CONFIDENTIEL :
-${excerpt}`,
+${sourceBlock}`,
     };
 
     const raw = await callAi(PROMPTS[mode], 1400);
