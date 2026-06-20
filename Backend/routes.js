@@ -1142,10 +1142,6 @@ router.post("/sessions/create", auth, role("teacher", "admin"), uploadSessionMed
     let articleSections = JSON.parse(req.body.articleSections || "{}");
     const missingSection = req.body.missingSection || "";
     const articleFile = req.files?.article?.[0];
-    if (articleFile) {
-      // Fichier binaire : ne pas stocker le contenu brut dans les sections
-      articleSections = {};
-    }
     const targetSpecialites = JSON.parse(req.body.targetSpecialites || "[]");
     const activityMode = req.body.activityMode === "full_read" ? "full_read" : "section_learn";
 

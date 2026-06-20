@@ -1032,8 +1032,11 @@ export default function TeacherSession() {
           setSectionGuidance(prev => ({ ...prev, [sectionName]: starters }))
         }
         docType={docType}
-        onArticleTextConfirm={(visibleText, _removed, _section) => {
+        onArticleTextConfirm={(visibleText, removed, section) => {
           setArticleTextContent(visibleText);
+          if (removed && section) {
+            setArticleSections(prev => ({ ...prev, [section]: removed }));
+          }
         }}
       />
 
@@ -1050,8 +1053,11 @@ export default function TeacherSession() {
               setSectionGuidance(prev => ({ ...prev, [sectionName]: starters }))
             }
             docType={docType}
-            onConfirm={(visibleText) => {
+            onConfirm={(visibleText, removed, section) => {
               setArticleTextContent(visibleText);
+              if (removed && section) {
+                setArticleSections(prev => ({ ...prev, [section]: removed }));
+              }
               setActivityMode("section_learn");
               setArticleCutterOpen(false);
               setSectionModalOpen(false);
