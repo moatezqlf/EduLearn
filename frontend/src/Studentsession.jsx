@@ -9,6 +9,7 @@ import { STUDENT_PHASES, PEER_CRITERIA } from "./session/sessionPhases";
 import { LEARNING_WORKFLOW } from "./session/sectionConfig";
 import { downloadSessionArticle, resolveMediaUrl } from "./session/articleUtils";
 import ArticleDocumentPanel from "./session/ArticleDocumentPanel";
+import ScaffoldingPanel from "./session/ScaffoldingPanel";
 
 const SOCKET_URL = (import.meta.env.VITE_API_URL || "http://localhost:5000/api").replace(/\/api\/?$/, "");
 
@@ -817,9 +818,10 @@ export default function StudentSession() {
                         <p style={{ fontSize: 12, color: "#374151", lineHeight: 1.6, margin: "6px 0 0" }}>{question}</p>
                       </div>
                     )}
+                    {/* Teacher-configured starters (kept as quick-access) */}
                     {activeStarters.length > 0 && (
                       <div style={nw.sideCard}>
-                        <div style={nw.sideCardTitle}>Amorces de phrases</div>
+                        <div style={nw.sideCardTitle}>Amorces du professeur</div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
                           {activeStarters.map((s, i) => (
                             <div key={i} style={nw.starterCard}>
@@ -830,6 +832,16 @@ export default function StudentSession() {
                         </div>
                       </div>
                     )}
+
+                    {/* AI Scaffolding panel */}
+                    {sessionId && (activeSectionKey || missingSection) && (
+                      <ScaffoldingPanel
+                        sessionId={sessionId}
+                        sectionKey={activeSectionKey || missingSection}
+                        onInsert={insertStarter}
+                      />
+                    )}
+
                     <div style={{ ...nw.sideCard, background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: "#166534", marginBottom: 6 }}>TU PEUX RELIRE L'ARTICLE COMPLET</div>
                       <button type="button" onClick={() => setActiveWritingTab(1)}

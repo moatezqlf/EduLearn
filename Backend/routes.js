@@ -1624,6 +1624,70 @@ router.patch("/notifications/read-all", auth, async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────
+//  Scaffolding adaptatif — génération IA par mode
+// ──────────────────────────────────────────────────────────────
+router.post("/scaffolding/generate", auth, async (req, res) => {
+  try {
+    const { sessionId, sectionKey, mode = "questions" } = req.body;
+    if (!sessionId || !sectionKey) return res.status(400).json({ message: "sessionId et sectionKey requis" });
+    if (!["questions", "starters", "template"].includes(mode)) return res.status(400).json({ message: "Mode invalide" });
+
+    const session = await Session.findById(sessionId).select("articleSections missingSection").lean();
+    if (!session) return res.status(404).json({ message: "Session introuvable" });
+
+    // Contenu original de la section (jamais envoyé directement au student)
+    const originalContent = (session.articleSections?.[sectionKey] || "").trim();
+    if (!originalContent) {
+      return res.status(422).json({ message: `Contenu original de la section « ${sectionKey} » non disponible. Le scaffolding fonctionne uniquement avec des articles textuels (non PDF scanné).` });
+    }
+
+    const excerpt = originalContent.slice(0, 2500); // limite tokens
+
+    const PROMPTS = {
+      questions: `Tu es un assistant pédagogique spécialisé en rédaction académique.
+À partir du contenu CONFIDENTIEL de la section « ${sectionKey} » ci-dessous, génère exactement 5 questions progressives (du général au spécifique) pour guider un étudiant dans la rédaction de cette section.
+RÈGLES : Ne révèle JAMAIS le contenu original. Chaque question doit inclure un "hint" court (1 phrase).
+Réponds UNIQUEMENT avec du JSON valide, sans texte autour :
+{"items":[{"id":1,"question":"...","hint":"..."},{"id":2,"question":"...","hint":"..."},{"id":3,"question":"...","hint":"..."},{"id":4,"question":"...","hint":"..."},{"id":5,"question":"...","hint":"..."}]}
+
+CONTENU CONFIDENTIEL :
+${excerpt}`,
+
+      starters: `Tu es un assistant pédagogique spécialisé en rédaction académique.
+À partir du contenu CONFIDENTIEL de la section « ${sectionKey} » ci-dessous, génère exactement 6 amorces de phrases en français académique couvrant les idées clés. L'étudiant les complètera lui-même.
+RÈGLES : Ne copie PAS de phrases entières du texte. Chaque amorce a un "purpose" court (3-5 mots).
+Réponds UNIQUEMENT avec du JSON valide :
+{"items":[{"id":1,"starter":"...","purpose":"..."},{"id":2,"starter":"...","purpose":"..."},{"id":3,"starter":"...","purpose":"..."},{"id":4,"starter":"...","purpose":"..."},{"id":5,"starter":"...","purpose":"..."},{"id":6,"starter":"...","purpose":"..."}]}
+
+CONTENU CONFIDENTIEL :
+${excerpt}`,
+
+      template: `Tu es un assistant pédagogique spécialisé en rédaction académique.
+À partir du contenu CONFIDENTIEL de la section « ${sectionKey} » ci-dessous, génère un plan structuré en 4 étapes pour rédiger cette section.
+RÈGLES : Chaque étape a un "step" (titre), une "instruction" claire et un "example" concret FICTIF (pas copié du texte).
+Réponds UNIQUEMENT avec du JSON valide :
+{"items":[{"id":1,"step":"Étape 1 — ...","instruction":"...","example":"..."},{"id":2,"step":"Étape 2 — ...","instruction":"...","example":"..."},{"id":3,"step":"Étape 3 — ...","instruction":"...","example":"..."},{"id":4,"step":"Étape 4 — ...","instruction":"...","example":"..."}]}
+
+CONTENU CONFIDENTIEL :
+${excerpt}`,
+    };
+
+    const raw = await callAi(PROMPTS[mode], 1400);
+
+    // Parse JSON — accepte les réponses wrappées en markdown
+    const clean = raw.replace(/```json\n?|```\n?/g, "").trim();
+    const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
+    if (s === -1 || e === -1) throw new Error("Réponse IA non valide — réessayez.");
+    const parsed = JSON.parse(clean.slice(s, e + 1));
+
+    res.json({ mode, sectionKey, items: parsed.items || [] });
+  } catch (err) {
+    console.error("[Scaffolding]", err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────
 //  Student joins a session by code
 // ──────────────────────────────────────────────────────────────
 router.post("/sessions/join", auth, async (req, res) => {
@@ -1634,6 +1698,17 @@ router.post("/sessions/join", auth, async (req, res) => {
     const session = await Session.findOne({ code: code.toUpperCase() });
     if (!session) {
       return res.status(404).json({ message: "Session introuvable. Vérifiez le code." });
+    }
+
+    if (session.isScheduled) {
+      const scheduledLabel = session.scheduledAt
+        ? new Date(session.scheduledAt).toLocaleString("fr-FR", { dateStyle: "full", timeStyle: "short" })
+        : "une date ultérieure";
+      return res.status(403).json({
+        message: `Cette session n'est pas encore ouverte. Elle démarrera le ${scheduledLabel}.`,
+        scheduled: true,
+        scheduledAt: session.scheduledAt,
+      });
     }
 
     res.json({
