@@ -1053,13 +1053,15 @@ router.get("/students/groups-by-specialty", auth, role("teacher", "admin"), asyn
   try {
     const teacherCourses = await Course.find({ teacher: req.user.id }).distinct("_id");
     const enrollments = await Enrollment.find({ course: { $in: teacherCourses } })
-      .populate({ path: "student", select: "name email specialite status" });
+      .populate({ path: "student", select: "name email specialite status role" });
     const seen = new Set();
     const groups = {};
     let pendingCount = 0;
     for (const e of enrollments) {
       const st = e.student;
       if (!st) continue;
+      // Only real students — exclude teachers and admins enrolled in their own course
+      if (st.role !== "student") continue;
       // Include active AND pending students (pending shown with flag)
       if (!["active", "pending"].includes(st.status)) continue;
       const id = String(st._id);
@@ -1092,14 +1094,22 @@ router.get("/sessions/received", auth, role("student"), async (req, res) => {
     const courseIds = enrollments.map(e => e.course);
     const teacherIds = await Course.find({ _id: { $in: courseIds } }).distinct("teacher");
 
+    // Sessions the student has already submitted answers for → belong in History, not Resources
+    const studentIdRegex = new RegExp(`^${req.user.id}(::|$)`);
+    const participatedIds = new Set(
+      (await SessionSubmission.find({ studentId: studentIdRegex }).distinct("sessionId")).map(String)
+    );
+
     const sessionsRaw = await Session.find({ createdBy: { $in: teacherIds } })
       .populate("createdBy", "name")
       .select("code question instructions docType resourceType activityMode missingSection articleSections articleFileUrl articleFileName articleFileMime selectedSections evaluationCriteria targetSpecialites createdAt videoUrl")
       .sort({ createdAt: -1 })
-      .limit(120)
+      .limit(200)
       .lean();
 
     const sessions = sessionsRaw.filter(s => {
+      // Exclude sessions the student already participated in (shown in History)
+      if (participatedIds.has(String(s._id))) return false;
       const targets = s.targetSpecialites || [];
       if (!targets.length) return true;
       if (!spec) return true;
