@@ -344,6 +344,41 @@ router.get("/courses/enrolled", auth, async (req, res) => {
   res.json({ courses: enrollments.map(e => ({ ...e.course.toObject(), progress: e.progress })) });
 });
 
+// GET /api/courses/my-resources — pedagogical resources from enrolled courses' modules
+router.get("/courses/my-resources", auth, async (req, res) => {
+  try {
+    const enrollments = await Enrollment.find({ student: req.user.id }).select("course");
+    const courseIds = enrollments.map(e => e.course);
+    const courses = await Course.find({ _id: { $in: courseIds } })
+      .populate("teacher", "name")
+      .select("title teacher modules")
+      .lean();
+
+    const resources = [];
+    for (const course of courses) {
+      for (const mod of course.modules || []) {
+        for (const r of mod.resources || []) {
+          resources.push({
+            id:          String(r._id || ""),
+            courseId:    String(course._id),
+            courseTitle: course.title,
+            teacherName: course.teacher?.name || "",
+            moduleTitle: mod.title,
+            title:       r.title || mod.title,
+            url:         r.url || "",
+            type:        r.type || "link",
+            createdAt:   mod.createdAt || null,
+          });
+        }
+      }
+    }
+
+    // Sort newest module first
+    resources.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    res.json({ resources });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
 router.get("/courses/:id", async (req, res) => {
   const course = await Course.findById(req.params.id).populate("teacher", "name avatar bio");
   if (!course) return res.status(404).json({ message: "Course not found" });

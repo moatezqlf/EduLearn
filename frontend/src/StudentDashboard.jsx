@@ -153,7 +153,7 @@ export default function StudentDashboard() {
       ]);
       const [hRes, rRes] = await Promise.all([
         api.sessions.getHistory().catch(() => ({ history: [] })),
-        api.sessions.getReceived().catch(() => ({ resources: [] })),
+        api.courses.getMyResources().catch(() => ({ resources: [] })),
       ]);
       setCourses(cRes.courses     || []);
       setTeacherResources(rRes.resources || []);
@@ -528,25 +528,30 @@ export default function StudentDashboard() {
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {teacherResources.map(r => (
-                  <div
-                    key={r.sessionId}
-                    className="card"
-                    style={{ padding: 14, cursor: "pointer" }}
-                    onClick={() => setViewResource(r)}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                      <div>
-                        <p style={{ fontWeight: 600, fontSize: 14, color: "#1A1D23" }}>{r.question}</p>
-                        <p style={{ fontSize: 11, color: "#9CA3AF", marginTop: 4 }}>
-                          {r.teacherName}
-                          {r.missingSection ? ` · Section à apprendre : ${r.missingSection}` : ""}
-                        </p>
+                {teacherResources.map(r => {
+                  const typeIcon = r.type === "pdf" ? "📄" : r.type === "video" ? "🎥" : r.type === "link" ? "🔗" : "📎";
+                  return (
+                    <div
+                      key={r.id}
+                      className="card"
+                      style={{ padding: 14, cursor: r.url ? "pointer" : "default" }}
+                      onClick={() => r.url && window.open(r.url, "_blank", "noopener noreferrer")}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                          <span style={{ fontSize: 22, flexShrink: 0, lineHeight: 1 }}>{typeIcon}</span>
+                          <div>
+                            <p style={{ fontWeight: 600, fontSize: 14, color: "#1A1D23" }}>{r.title}</p>
+                            <p style={{ fontSize: 11, color: "#9CA3AF", marginTop: 4 }}>
+                              {r.courseTitle} · {r.moduleTitle} · {r.teacherName}
+                            </p>
+                          </div>
+                        </div>
+                        {r.url && <span style={{ fontSize: 11, color: "#6366f1", fontWeight: 600, flexShrink: 0 }}>Ouvrir →</span>}
                       </div>
-                      <span style={{ fontSize: 11, color: "#6366f1", fontWeight: 600, flexShrink: 0 }}>Lire →</span>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

@@ -198,7 +198,8 @@ export const courses = {
       if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.message || "Upload failed"); }
       return r.json();
     }),
-  getEnrolled: ()                 => get("/courses/enrolled"),
+  getEnrolled:    ()               => get("/courses/enrolled"),
+  getMyResources: ()               => get("/courses/my-resources"),
   getProgress: (id)               => get(`/courses/${id}/progress`),
   updateProgress: (id, moduleId)  => patch(`/courses/${id}/progress`, { moduleId }),
 };
