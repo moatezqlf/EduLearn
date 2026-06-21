@@ -8,14 +8,13 @@ const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 // ── Token helpers ─────────────────────────────────────────────
 export const tokenStorage = {
-  get:    ()      => localStorage.getItem("edulearn_token"),
+  get:    ()      => sessionStorage.getItem("edulearn_token"),
   set:    (token) => {
-    localStorage.setItem("edulearn_token", token);
-    // Same-tab notification (storage event doesn't fire in same window)
+    sessionStorage.setItem("edulearn_token", token);
     window.dispatchEvent(new Event("auth:token"));
   },
   remove: ()      => {
-    localStorage.removeItem("edulearn_token");
+    sessionStorage.removeItem("edulearn_token");
     window.dispatchEvent(new Event("auth:logout"));
   },
 };

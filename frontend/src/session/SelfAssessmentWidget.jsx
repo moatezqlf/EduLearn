@@ -21,7 +21,7 @@ export default function SelfAssessmentWidget({ sessionId, sectionKey, studentNam
     if (!selected) return;
     setLoading(true);
     try {
-      const token = localStorage.getItem("edulearn_token");
+      const token = sessionStorage.getItem("edulearn_token");
       await fetch(`${API}/sessions/${sessionId}/self-assessment`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },

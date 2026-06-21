@@ -33,7 +33,7 @@ export default function ScaffoldingPanel({ sessionId, sectionKey, onInsert }) {
   const generate = async (targetMode = mode) => {
     setLoading(true); setError(""); setItems([]); setChecked({}); setGenerated(false);
     try {
-      const token = localStorage.getItem("edulearn_token");
+      const token = sessionStorage.getItem("edulearn_token");
       const res = await fetch(`${API}/scaffolding/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },

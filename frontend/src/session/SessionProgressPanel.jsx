@@ -439,7 +439,7 @@ export default function SessionProgressPanel({ sessionId, selectedSections: prop
     setLoading(true);
     setError("");
     try {
-      const token = localStorage.getItem("edulearn_token");
+      const token = sessionStorage.getItem("edulearn_token");
       const res = await fetch(`${API_URL}/sessions/${sessionId}/section-progress`, {
         headers: { Authorization: `Bearer ${token}` },
       });

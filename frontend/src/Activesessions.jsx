@@ -72,7 +72,7 @@ export default function Activesessions() {
 
   const fetchSessions = async () => {
     try {
-      const token = localStorage.getItem("edulearn_token");
+      const token = sessionStorage.getItem("edulearn_token");
       const [activeRes, scheduledRes] = await Promise.all([
         fetch(`${API}/sessions/active`,    { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${API}/sessions/scheduled`, { headers: { Authorization: `Bearer ${token}` } }),

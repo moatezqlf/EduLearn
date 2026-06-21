@@ -329,7 +329,7 @@ export default function TeacherSession() {
   };
 
   useEffect(() => {
-    const token = localStorage.getItem("edulearn_token");
+    const token = sessionStorage.getItem("edulearn_token");
     const socket = io(SOCKET_URL, {
       auth: { token },
       transports: ["websocket"],
@@ -408,7 +408,7 @@ export default function TeacherSession() {
       if (articleFile) formData.append("article", articleFile);
       if (scheduleMode && scheduledAt) formData.append("scheduledAt", new Date(scheduledAt).toISOString());
 
-      const token = localStorage.getItem("edulearn_token");
+      const token = sessionStorage.getItem("edulearn_token");
       const res = await fetch(`${API_URL}/sessions/create`, {
         method: "POST",
         body: formData,
@@ -1059,7 +1059,7 @@ export default function TeacherSession() {
                 setArticleSections(prev => ({ ...prev, [section]: removed }));
                 // If session already created, sync hidden section content to backend for scaffolding
                 if (sessionId) {
-                  const token = localStorage.getItem("edulearn_token");
+                  const token = sessionStorage.getItem("edulearn_token");
                   fetch(`${API_URL}/sessions/${sessionId}/article-sections`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
