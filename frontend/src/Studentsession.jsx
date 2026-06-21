@@ -10,6 +10,7 @@ import { LEARNING_WORKFLOW } from "./session/sectionConfig";
 import { downloadSessionArticle, resolveMediaUrl } from "./session/articleUtils";
 import ArticleDocumentPanel from "./session/ArticleDocumentPanel";
 import ScaffoldingPanel from "./session/ScaffoldingPanel";
+import SelfAssessmentWidget from "./session/SelfAssessmentWidget";
 
 const SOCKET_URL = (import.meta.env.VITE_API_URL || "http://localhost:5000/api").replace(/\/api\/?$/, "");
 
@@ -200,6 +201,9 @@ export default function StudentSession() {
   const [aiFeedback, setAiFeedback]   = useState(null);
   const [aiLoading, setAiLoading]     = useState(false);
   const [aiEvalProgress, setAiEvalProgress] = useState(null);
+
+  // Self-assessment (dismissed per-section)
+  const [selfAssessmentDismissed, setSelfAssessmentDismissed] = useState({});
 
   // Revision
   const [revision, setRevision]       = useState("");
@@ -1015,6 +1019,16 @@ export default function StudentSession() {
                           </div>
                         ) : (
                           <div style={{ marginTop: 12, color: "#166534", fontWeight: 600, fontSize: 13 }}>✅ Révision soumise !</div>
+                        )}
+
+                        {/* ── Self-assessment widget ── */}
+                        {sessionId && (missingSection || currentSectionKey) && !selfAssessmentDismissed[missingSection || currentSectionKey] && (
+                          <SelfAssessmentWidget
+                            sessionId={sessionId}
+                            sectionKey={missingSection || currentSectionKey}
+                            studentName={name}
+                            onDismiss={() => setSelfAssessmentDismissed(prev => ({ ...prev, [missingSection || currentSectionKey]: true }))}
+                          />
                         )}
                       </div>
                     )}

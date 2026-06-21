@@ -789,7 +789,7 @@ router.get("/sessions/:sessionId/section-progress", auth, async (req, res) => {
 
     const selectedSections = session.selectedSections || [];
     const submissions = await SessionSubmission.find({ sessionId: req.params.sessionId })
-      .select("studentId studentName round sectionKey sectionAnswers sectionScores aiScore aiFeedback peerReviews submittedAt")
+      .select("studentId studentName round sectionKey sectionAnswers sectionScores selfAssessment aiScore aiFeedback peerReviews submittedAt")
       .lean();
 
     // Build per-student aggregated data
@@ -801,12 +801,19 @@ router.get("/sessions/:sessionId/section-progress", auth, async (req, res) => {
           studentId: sub.studentId,
           studentName: sub.studentName,
           sectionScores: {},
+          selfAssessment: {},
           submissions: [],
           lastActivityAt: null,
         });
       }
       const entry = studentMap.get(key);
       entry.submissions.push(sub);
+      // Merge self-assessment scores (latest value per section wins)
+      if (sub.selfAssessment && typeof sub.selfAssessment === "object") {
+        for (const [sk, score] of Object.entries(sub.selfAssessment)) {
+          if (Number.isFinite(Number(score))) entry.selfAssessment[sk] = Number(score);
+        }
+      }
 
       const subAt = sub.submittedAt ? new Date(sub.submittedAt) : null;
       if (subAt && (!entry.lastActivityAt || subAt > entry.lastActivityAt)) {
@@ -867,6 +874,7 @@ router.get("/sessions/:sessionId/section-progress", auth, async (req, res) => {
         studentId: entry.studentId,
         studentName: entry.studentName,
         sectionScores: entry.sectionScores,
+        selfAssessment: entry.selfAssessment,
         peerAverages,
         completedSections,
         lastSectionKey,
@@ -917,10 +925,15 @@ router.get("/sessions/:sessionId/section-progress", auth, async (req, res) => {
         .filter(v => Number.isFinite(Number(v)))
         .map(Number);
       const submitted = students.filter(s => s.completedSections.includes(sk)).length;
+      const saScores = students
+        .map(s => s.selfAssessment?.[sk])
+        .filter(v => Number.isFinite(Number(v)))
+        .map(Number);
       sectionStats[sk] = {
         avgScore: scores.length ? Number((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1)) : null,
         maxScore: scores.length ? Math.max(...scores) : null,
         minScore: scores.length ? Math.min(...scores) : null,
+        avgSelfAssessment: saScores.length ? Number((saScores.reduce((a, b) => a + b, 0) / saScores.length).toFixed(2)) : null,
         submitted,
         total: students.length,
         completionRate: students.length > 0 ? Number((submitted / students.length).toFixed(2)) : 0,
@@ -1617,6 +1630,39 @@ router.patch("/notifications/read-all", auth, async (req, res) => {
     await Notification.updateMany({ userId: req.user.id, read: false }, { read: true });
     res.json({ success: true });
   } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// ──────────────────────────────────────────────────────────────
+//  Self-assessment Likert (1-5) per section — student endpoint
+// ──────────────────────────────────────────────────────────────
+router.post("/sessions/:sessionId/self-assessment", auth, async (req, res) => {
+  try {
+    const { sectionKey, score, studentName } = req.body;
+    const s = parseInt(score, 10);
+    if (!sectionKey || !Number.isFinite(s) || s < 1 || s > 5)
+      return res.status(400).json({ message: "sectionKey et score (1-5) requis" });
+
+    const studentId = req.user.id;
+    const sessionId = req.params.sessionId;
+
+    // Update latest existing submission or create a placeholder
+    const updated = await SessionSubmission.findOneAndUpdate(
+      { sessionId, studentId },
+      { $set: { [`selfAssessment.${sectionKey}`]: s } },
+      { sort: { round: -1 }, new: true }
+    );
+    if (!updated) {
+      await SessionSubmission.findOneAndUpdate(
+        { sessionId, studentId, round: 0 },
+        { $set: { [`selfAssessment.${sectionKey}`]: s }, $setOnInsert: { studentName: studentName || "" } },
+        { upsert: true }
+      );
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[Self-assessment]", err.message);
+    res.status(500).json({ message: err.message });
+  }
 });
 
 // ──────────────────────────────────────────────────────────────

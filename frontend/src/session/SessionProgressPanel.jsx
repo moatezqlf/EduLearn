@@ -126,7 +126,7 @@ function GroupCards({ groups, selectedSections }) {
   );
 }
 
-// ─── Scores Matrix (students × sections) ────────────────────────────
+// ─── Scores Matrix (AI — students × sections) ───────────────────────
 function ScoresMatrix({ students, selectedSections }) {
   if (!students.length) return <div style={st.empty}>Aucun étudiant n'a encore soumis.</div>;
 
@@ -205,7 +205,122 @@ function ScoresMatrix({ students, selectedSections }) {
   );
 }
 
+// ─── Self-Assessment Matrix (students × sections, Likert 1-5) ────────
+function SelfAssessmentMatrix({ students, selectedSections }) {
+  if (!students.length) return <div style={st.empty}>Aucune auto-évaluation soumise pour l'instant.</div>;
+
+  const hasAny = students.some(s => Object.keys(s.selfAssessment || {}).length > 0);
+  if (!hasAny) return (
+    <div style={st.empty}>
+      Les étudiants n'ont pas encore soumis d'auto-évaluation.<br />
+      <span style={{ fontSize: 11, color: "#94a3b8" }}>Le widget apparaît après réception du feedback IA.</span>
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Divergence legend */}
+      <div style={{ display: "flex", gap: 14, marginBottom: 12, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11, color: "#64748b" }}>
+          <strong>⚠↑</strong> Surconfiant — perception &gt; score IA
+        </span>
+        <span style={{ fontSize: 11, color: "#64748b" }}>
+          <strong>⚠↓</strong> Sous-confiant — perception &lt; score IA
+        </span>
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={st.table}>
+          <thead>
+            <tr>
+              <th style={{ ...st.th, textAlign: "left", minWidth: 130 }}>Étudiant</th>
+              {selectedSections.map(sk => (
+                <th key={sk} style={{ ...st.th, color: sectionColor(sk) }}>{sk}</th>
+              ))}
+              <th style={st.th}>Moy. percept.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {students.map((s, i) => {
+              const saScores = selectedSections
+                .map(sk => s.selfAssessment?.[sk])
+                .filter(v => Number.isFinite(Number(v)))
+                .map(Number);
+              const saAvg = saScores.length
+                ? Number((saScores.reduce((a, b) => a + b, 0) / saScores.length).toFixed(1))
+                : null;
+
+              return (
+                <tr key={String(s.studentId)} style={{ background: i % 2 === 0 ? "#fff" : "#fafafe" }}>
+                  <td style={st.td}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{
+                        width: 26, height: 26, borderRadius: "50%", flexShrink: 0,
+                        background: "#6366f122", color: "#6366f1", fontWeight: 700, fontSize: 11,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>
+                        {String(s.studentName || "?")[0].toUpperCase()}
+                      </div>
+                      <span style={{ fontWeight: 600, fontSize: 12, color: "#1e293b" }}>{s.studentName}</span>
+                    </div>
+                  </td>
+                  {selectedSections.map(sk => {
+                    const sa = s.selfAssessment?.[sk];
+                    const aiSc = s.sectionScores?.[sk]?.score ?? null;
+                    return (
+                      <td key={sk} style={{ ...st.td, textAlign: "center" }}>
+                        <LikertBadge score={sa ?? null} />
+                        <DivergenceBadge aiScore={aiSc} selfScore={sa ?? null} />
+                      </td>
+                    );
+                  })}
+                  <td style={{ ...st.td, textAlign: "center" }}>
+                    <LikertBadge score={saAvg} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ─── Section Stats Row ───────────────────────────────────────────────
+const LIKERT_COLORS = ["", "#ef4444", "#f97316", "#f59e0b", "#22c55e", "#6366f1"];
+const LIKERT_LABELS = ["", "Très faible", "Faible", "Modéré", "Élevé", "Très élevé"];
+const LIKERT_EMOJI  = ["", "😟", "😕", "😐", "😊", "😄"];
+
+function LikertBadge({ score }) {
+  if (score == null) return <span style={{ color: "#cbd5e1", fontSize: 11 }}>—</span>;
+  const v = Math.round(score);
+  const color = LIKERT_COLORS[v] || "#94a3b8";
+  return (
+    <span title={LIKERT_LABELS[v] || ""} style={{
+      display: "inline-flex", alignItems: "center", gap: 3,
+      padding: "2px 6px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+      background: color + "22", color,
+    }}>
+      {LIKERT_EMOJI[v]} {typeof score === "number" ? score.toFixed(1) : score}/5
+    </span>
+  );
+}
+
+function DivergenceBadge({ aiScore, selfScore }) {
+  if (aiScore == null || selfScore == null) return null;
+  // Normalize both to 0-1 range
+  const aiNorm   = aiScore / 20;
+  const selfNorm = (selfScore - 1) / 4;
+  const diff = selfNorm - aiNorm;
+  if (Math.abs(diff) < 0.25) return null; // no significant divergence
+  if (diff > 0.25) return (
+    <span title="Étudiant surconfiant : perception plus haute que le score IA" style={{ fontSize: 10, color: "#dc2626", fontWeight: 700, marginLeft: 4 }}>⚠↑</span>
+  );
+  return (
+    <span title="Étudiant sous-confiant : perception plus basse que le score IA" style={{ fontSize: 10, color: "#7c3aed", fontWeight: 700, marginLeft: 4 }}>⚠↓</span>
+  );
+}
+
 function SectionStatsRow({ selectedSections, sectionStats }) {
   if (!selectedSections.length) return null;
 
@@ -226,6 +341,12 @@ function SectionStatsRow({ selectedSections, sectionStats }) {
                 <div style={{ fontSize: 10, color: "#94a3b8" }}>Moy. IA</div>
                 <div style={{ fontWeight: 700, fontSize: 15, color: scoreColor(stats.avgScore) }}>
                   {stats.avgScore != null ? `${stats.avgScore}/20` : "—"}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: "#94a3b8" }}>Perception</div>
+                <div style={{ fontWeight: 700, fontSize: 15, color: LIKERT_COLORS[Math.round(stats.avgSelfAssessment)] || "#94a3b8" }}>
+                  {stats.avgSelfAssessment != null ? `${stats.avgSelfAssessment}/5` : "—"}
                 </div>
               </div>
               <div>
@@ -386,11 +507,12 @@ export default function SessionProgressPanel({ sessionId, selectedSections: prop
           )}
 
           {/* Tabs */}
-          <div style={{ display: "flex", gap: 4, borderBottom: "2px solid #e2e8f0", marginBottom: 16 }}>
+          <div style={{ display: "flex", gap: 4, borderBottom: "2px solid #e2e8f0", marginBottom: 16, flexWrap: "wrap" }}>
             {[
-              { id: "groups",  label: "Groupes" },
-              { id: "matrix",  label: "Scores par section" },
-              { id: "timers",  label: "Timers" },
+              { id: "groups",     label: "Groupes" },
+              { id: "matrix",     label: "Scores IA" },
+              { id: "perception", label: "📊 Perception" },
+              { id: "timers",     label: "Timers" },
             ].map(t => (
               <button
                 key={t.id}
@@ -413,6 +535,9 @@ export default function SessionProgressPanel({ sessionId, selectedSections: prop
           )}
           {tab === "matrix" && (
             <ScoresMatrix students={data.students} selectedSections={sections} />
+          )}
+          {tab === "perception" && (
+            <SelfAssessmentMatrix students={data.students} selectedSections={sections} />
           )}
           {tab === "timers" && (
             <TimerLog timings={data.timings} configuredTimings={data.configuredTimings} />

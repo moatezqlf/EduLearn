@@ -239,6 +239,8 @@ const sessionSubmissionSchema = new mongoose.Schema({
   // Per-section AI scores — indexed by sectionKey for fast cross-section queries
   // { "Introduction": { score: 15, feedback: {...}, submittedAt: Date },  "Méthodes": {...} }
   sectionScores: { type: mongoose.Schema.Types.Mixed, default: {} },
+  // Likert 1-5 self-assessment per section: { "Discussion": 3, "Introduction": 4 }
+  selfAssessment: { type: mongoose.Schema.Types.Mixed, default: {} },
   peerReviews: [peerReviewSchema],
   revisions:   [revisionSchema],
   submittedAt: { type: Date, default: Date.now },
