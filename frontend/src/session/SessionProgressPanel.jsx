@@ -366,6 +366,208 @@ function SectionStatsRow({ selectedSections, sectionStats }) {
   );
 }
 
+// ─── Status badge ────────────────────────────────────────────────────
+const STATUS_META = {
+  not_started:    { label: "Non commencé",  color: "#94a3b8", bg: "#f1f5f9", icon: "○" },
+  in_progress:    { label: "En cours",       color: "#3b82f6", bg: "#eff6ff", icon: "⟳" },
+  in_review:      { label: "En révision",    color: "#f59e0b", bg: "#fffbeb", icon: "✏" },
+  needs_revision: { label: "À retravailler", color: "#ef4444", bg: "#fef2f2", icon: "⚠" },
+  completed:      { label: "Terminé",        color: "#22c55e", bg: "#f0fdf4", icon: "✓" },
+};
+
+function StatusBadge({ status }) {
+  if (!status) return <span style={{ color: "#cbd5e1", fontSize: 11 }}>—</span>;
+  const m = STATUS_META[status] || { label: status, color: "#6366f1", bg: "#eef2ff", icon: "?" };
+  return (
+    <span title={m.label} style={{
+      display: "inline-flex", alignItems: "center", gap: 3,
+      padding: "2px 7px", borderRadius: 6, fontSize: 10, fontWeight: 700,
+      background: m.bg, color: m.color, whiteSpace: "nowrap",
+    }}>
+      {m.icon} {m.label}
+    </span>
+  );
+}
+
+// ─── Cohort Analytics Tab ────────────────────────────────────────────
+function CohortAnalytics({ students, selectedSections, sectionStats }) {
+  if (!students.length) return <div style={st.empty}>Aucun étudiant pour l'instant.</div>;
+
+  // Flag students needing intervention
+  const flagged = students.map(s => {
+    const aiScores   = selectedSections.map(sk => s.sectionScores?.[sk]?.score).filter(v => v != null);
+    const saScores   = selectedSections.map(sk => s.selfAssessment?.[sk]).filter(v => v != null);
+    const avgAI      = aiScores.length  ? aiScores.reduce((a, b) => a + b, 0)  / aiScores.length  : null;
+    const avgSA      = saScores.length  ? saScores.reduce((a, b) => a + b, 0)  / saScores.length  : null;
+
+    let flag = null;
+    // Low score + high confidence → false confidence
+    if (avgAI != null && avgSA != null && avgAI < 10 && avgSA >= 4)
+      flag = { type: "false_confidence", label: "Fausse confiance", color: "#f97316", icon: "⚠↑" };
+    // Low score + low confidence → struggling
+    else if (avgAI != null && avgSA != null && avgAI < 10 && avgSA <= 2)
+      flag = { type: "struggling", label: "En difficulté", color: "#ef4444", icon: "🆘" };
+    // Good score + low confidence → underconfident
+    else if (avgAI != null && avgSA != null && avgAI >= 12 && avgSA <= 2)
+      flag = { type: "underconfident", label: "Sous-confiant", color: "#3b82f6", icon: "⚠↓" };
+
+    return { ...s, avgAI, avgSA, flag };
+  });
+
+  const interventionStudents = flagged.filter(s => s.flag);
+  const difficultSections = selectedSections.filter(sk => sectionStats?.[sk]?.isDifficult);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
+      {/* Section-level analytics */}
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 10 }}>Analyse par section</div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={st.table}>
+            <thead>
+              <tr>
+                <th style={{ ...st.th, textAlign: "left" }}>Section</th>
+                <th style={st.th}>Moy. IA</th>
+                <th style={st.th}>Moy. Pairs</th>
+                <th style={st.th}>Satisfaction</th>
+                <th style={st.th}>Taux complet.</th>
+                <th style={st.th}>Statut</th>
+              </tr>
+            </thead>
+            <tbody>
+              {selectedSections.map((sk, i) => {
+                const stats = sectionStats?.[sk] || {};
+                const pct   = Math.round((stats.completionRate || 0) * 100);
+                return (
+                  <tr key={sk} style={{ background: i % 2 === 0 ? "#fff" : "#fafafe" }}>
+                    <td style={st.td}>
+                      <span style={{ fontWeight: 700, color: sectionColor(sk), fontSize: 12 }}>{sk}</span>
+                      {stats.isDifficult && (
+                        <span title="Section difficile" style={{ marginLeft: 6, fontSize: 10, color: "#ef4444", fontWeight: 700 }}>⚠ Difficile</span>
+                      )}
+                    </td>
+                    <td style={{ ...st.td, textAlign: "center" }}>
+                      <ScoreBadge score={stats.avgScore ?? null} />
+                    </td>
+                    <td style={{ ...st.td, textAlign: "center" }}>
+                      {stats.avgPeerScore != null
+                        ? <span style={{ fontSize: 12, fontWeight: 700, color: "#8b5cf6" }}>{stats.avgPeerScore.toFixed(1)}/5</span>
+                        : <span style={{ color: "#cbd5e1", fontSize: 11 }}>—</span>}
+                    </td>
+                    <td style={{ ...st.td, textAlign: "center" }}>
+                      <LikertBadge score={stats.avgSelfAssessment ?? null} />
+                    </td>
+                    <td style={{ ...st.td, textAlign: "center" }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: pct >= 75 ? "#22c55e" : pct >= 40 ? "#f59e0b" : "#ef4444" }}>
+                        {pct}%
+                      </div>
+                      <div style={{ fontSize: 10, color: "#94a3b8" }}>{stats.submitted}/{stats.total}</div>
+                    </td>
+                    <td style={{ ...st.td, textAlign: "center" }}>
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999,
+                        background: stats.isDifficult ? "#fef2f2" : pct >= 75 ? "#f0fdf4" : "#fffbeb",
+                        color: stats.isDifficult ? "#ef4444" : pct >= 75 ? "#22c55e" : "#f59e0b",
+                      }}>
+                        {stats.isDifficult ? "⚠ Difficile" : pct >= 75 ? "✓ Bon" : "En cours"}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Difficult sections alert */}
+      {difficultSections.length > 0 && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px" }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: "#dc2626", marginBottom: 4 }}>⚠ Sections difficiles détectées</div>
+          <p style={{ fontSize: 12, color: "#7f1d1d", margin: 0 }}>
+            Score IA moyen &lt; 10 ET satisfaction &lt; 3 : <strong>{difficultSections.join(", ")}</strong>
+          </p>
+        </div>
+      )}
+
+      {/* Student intervention matrix */}
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 6 }}>
+          Matrice par étudiant
+          {interventionStudents.length > 0 && (
+            <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 600, color: "#ef4444" }}>
+              {interventionStudents.length} étudiant(s) à surveiller
+            </span>
+          )}
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={st.table}>
+            <thead>
+              <tr>
+                <th style={{ ...st.th, textAlign: "left", minWidth: 130 }}>Étudiant</th>
+                {selectedSections.map(sk => (
+                  <th key={sk} style={{ ...st.th, color: sectionColor(sk), minWidth: 100 }}>{sk}</th>
+                ))}
+                <th style={st.th}>Moy. IA</th>
+                <th style={st.th}>Satisfaction</th>
+                <th style={st.th}>Alerte</th>
+              </tr>
+            </thead>
+            <tbody>
+              {flagged.map((s, i) => (
+                <tr key={String(s.studentId)} style={{ background: i % 2 === 0 ? "#fff" : "#fafafe" }}>
+                  <td style={st.td}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{
+                        width: 26, height: 26, borderRadius: "50%", flexShrink: 0,
+                        background: "#6366f122", color: "#6366f1", fontWeight: 700, fontSize: 11,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>
+                        {String(s.studentName || "?")[0].toUpperCase()}
+                      </div>
+                      <span style={{ fontWeight: 600, fontSize: 12, color: "#1e293b" }}>{s.studentName}</span>
+                    </div>
+                  </td>
+                  {selectedSections.map(sk => (
+                    <td key={sk} style={{ ...st.td, textAlign: "center", verticalAlign: "top", paddingTop: 10 }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "center" }}>
+                        <ScoreBadge score={s.sectionScores?.[sk]?.score ?? null} />
+                        <LikertBadge score={s.selfAssessment?.[sk] ?? null} />
+                        <StatusBadge status={s.sectionStatus?.[sk] ?? null} />
+                      </div>
+                    </td>
+                  ))}
+                  <td style={{ ...st.td, textAlign: "center" }}>
+                    <ScoreBadge score={s.avgAI != null ? Math.round(s.avgAI) : null} />
+                  </td>
+                  <td style={{ ...st.td, textAlign: "center" }}>
+                    <LikertBadge score={s.avgSA ?? null} />
+                  </td>
+                  <td style={{ ...st.td, textAlign: "center" }}>
+                    {s.flag
+                      ? <span style={{ fontSize: 11, fontWeight: 700, color: s.flag.color, background: s.flag.color + "18", padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap" }}>
+                          {s.flag.icon} {s.flag.label}
+                        </span>
+                      : <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 600 }}>✓ OK</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11, color: "#64748b", background: "#f8fafc", borderRadius: 8, padding: "10px 14px" }}>
+        <span><strong style={{ color: "#f97316" }}>⚠↑ Fausse confiance</strong> — Score IA &lt; 10 mais satisfaction ≥ 4</span>
+        <span><strong style={{ color: "#ef4444" }}>🆘 En difficulté</strong> — Score IA &lt; 10 ET satisfaction ≤ 2</span>
+        <span><strong style={{ color: "#3b82f6" }}>⚠↓ Sous-confiant</strong> — Score IA ≥ 12 mais satisfaction ≤ 2</span>
+      </div>
+    </div>
+  );
+}
+
 // ─── Timer Log Table ─────────────────────────────────────────────────
 function TimerLog({ timings, configuredTimings }) {
   if (!timings?.length) return (
@@ -510,6 +712,7 @@ export default function SessionProgressPanel({ sessionId, selectedSections: prop
           <div style={{ display: "flex", gap: 4, borderBottom: "2px solid #e2e8f0", marginBottom: 16, flexWrap: "wrap" }}>
             {[
               { id: "groups",     label: "Groupes" },
+              { id: "cohort",     label: "📈 Cohorte" },
               { id: "matrix",     label: "Scores IA" },
               { id: "perception", label: "📊 Perception" },
               { id: "timers",     label: "Timers" },
@@ -532,6 +735,9 @@ export default function SessionProgressPanel({ sessionId, selectedSections: prop
 
           {tab === "groups" && (
             <GroupCards groups={data.groups} selectedSections={sections} />
+          )}
+          {tab === "cohort" && (
+            <CohortAnalytics students={data.students} selectedSections={sections} sectionStats={data.sectionStats} />
           )}
           {tab === "matrix" && (
             <ScoresMatrix students={data.students} selectedSections={sections} />

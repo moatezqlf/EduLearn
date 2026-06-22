@@ -241,6 +241,8 @@ const sessionSubmissionSchema = new mongoose.Schema({
   sectionScores: { type: mongoose.Schema.Types.Mixed, default: {} },
   // Likert 1-5 self-assessment per section: { "Discussion": 3, "Introduction": 4 }
   selfAssessment: { type: mongoose.Schema.Types.Mixed, default: {} },
+  // Section status per section: { "Introduction": "completed", "Méthodes": "in_progress" }
+  sectionStatus: { type: mongoose.Schema.Types.Mixed, default: {} },
   peerReviews: [peerReviewSchema],
   revisions:   [revisionSchema],
   submittedAt: { type: Date, default: Date.now },

@@ -11,6 +11,7 @@ import { downloadSessionArticle, resolveMediaUrl } from "./session/articleUtils"
 import ArticleDocumentPanel from "./session/ArticleDocumentPanel";
 import ScaffoldingPanel from "./session/ScaffoldingPanel";
 import SelfAssessmentWidget from "./session/SelfAssessmentWidget";
+import SectionStatusWidget from "./session/SectionStatusWidget";
 
 const SOCKET_URL = (import.meta.env.VITE_API_URL || "http://localhost:5000/api").replace(/\/api\/?$/, "");
 
@@ -1259,6 +1260,15 @@ export default function StudentSession() {
                     </div>
                   ))}
                 </div>
+              )}
+              {/* Section status + satisfaction after results */}
+              {sessionId && (results?.sectionResults?.sectionKey || missingSection || currentSectionKey) && (
+                <SectionStatusWidget
+                  sessionId={sessionId}
+                  sectionKey={results?.sectionResults?.sectionKey || missingSection || currentSectionKey}
+                  studentName={name}
+                  existingSatisfaction={selfAssessmentDismissed[results?.sectionResults?.sectionKey || missingSection || currentSectionKey]}
+                />
               )}
             </div>
           </div>

@@ -824,7 +824,7 @@ router.get("/sessions/:sessionId/section-progress", auth, async (req, res) => {
 
     const selectedSections = session.selectedSections || [];
     const submissions = await SessionSubmission.find({ sessionId: req.params.sessionId })
-      .select("studentId studentName round sectionKey sectionAnswers sectionScores selfAssessment aiScore aiFeedback peerReviews submittedAt")
+      .select("studentId studentName round sectionKey sectionAnswers sectionScores selfAssessment sectionStatus aiScore aiFeedback peerReviews submittedAt")
       .lean();
 
     // Build per-student aggregated data
@@ -837,6 +837,7 @@ router.get("/sessions/:sessionId/section-progress", auth, async (req, res) => {
           studentName: sub.studentName,
           sectionScores: {},
           selfAssessment: {},
+          sectionStatus: {},
           submissions: [],
           lastActivityAt: null,
         });
@@ -847,6 +848,12 @@ router.get("/sessions/:sessionId/section-progress", auth, async (req, res) => {
       if (sub.selfAssessment && typeof sub.selfAssessment === "object") {
         for (const [sk, score] of Object.entries(sub.selfAssessment)) {
           if (Number.isFinite(Number(score))) entry.selfAssessment[sk] = Number(score);
+        }
+      }
+      // Merge section status (latest value per section wins)
+      if (sub.sectionStatus && typeof sub.sectionStatus === "object") {
+        for (const [sk, st] of Object.entries(sub.sectionStatus)) {
+          if (st) entry.sectionStatus[sk] = st;
         }
       }
 
@@ -910,6 +917,7 @@ router.get("/sessions/:sessionId/section-progress", auth, async (req, res) => {
         studentName: entry.studentName,
         sectionScores: entry.sectionScores,
         selfAssessment: entry.selfAssessment,
+        sectionStatus: entry.sectionStatus,
         peerAverages,
         completedSections,
         lastSectionKey,
@@ -959,19 +967,31 @@ router.get("/sessions/:sessionId/section-progress", auth, async (req, res) => {
         .map(s => s.sectionScores[sk]?.score)
         .filter(v => Number.isFinite(Number(v)))
         .map(Number);
+      const peerScores = students
+        .map(s => s.peerAverages?.[sk])
+        .filter(v => Number.isFinite(Number(v)))
+        .map(Number);
       const submitted = students.filter(s => s.completedSections.includes(sk)).length;
+      const completedCount = students.filter(s => s.sectionStatus?.[sk] === "completed").length;
       const saScores = students
         .map(s => s.selfAssessment?.[sk])
         .filter(v => Number.isFinite(Number(v)))
         .map(Number);
+      const avg = v => v.length ? Number((v.reduce((a, b) => a + b, 0) / v.length).toFixed(2)) : null;
       sectionStats[sk] = {
-        avgScore: scores.length ? Number((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1)) : null,
-        maxScore: scores.length ? Math.max(...scores) : null,
-        minScore: scores.length ? Math.min(...scores) : null,
-        avgSelfAssessment: saScores.length ? Number((saScores.reduce((a, b) => a + b, 0) / saScores.length).toFixed(2)) : null,
+        avgScore:          scores.length  ? Number((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1)) : null,
+        maxScore:          scores.length  ? Math.max(...scores) : null,
+        minScore:          scores.length  ? Math.min(...scores) : null,
+        avgPeerScore:      avg(peerScores),
+        avgSelfAssessment: avg(saScores),
         submitted,
+        completedCount,
         total: students.length,
-        completionRate: students.length > 0 ? Number((submitted / students.length).toFixed(2)) : 0,
+        completionRate:    students.length > 0 ? Number((submitted / students.length).toFixed(2)) : 0,
+        statusCompletionRate: students.length > 0 ? Number((completedCount / students.length).toFixed(2)) : 0,
+        // Difficult section: avg AI score < 10 AND avg satisfaction < 3
+        isDifficult: scores.length > 0 && saScores.length > 0
+          && avg(scores) < 10 && avg(saScores) < 3,
       };
     }
 
@@ -1481,27 +1501,58 @@ router.post("/sessions/extract-text", auth, uploadDoc.single("file"), async (req
     if (ext === "pdf" || file.mimetype === "application/pdf") {
       // Step 1: pdf-parse
       let localText = "";
+      let numPages = 1;
       try {
         const parsed = await pdfParse(file.buffer);
         localText = (parsed.text || "").trim();
+        numPages = parsed.numpages || 1;
       } catch { /* fall through */ }
 
-      // Step 2: pdfjs-dist (handles more PDF types/encodings)
-      if (localText.length < 60) {
+      // Step 2: pdfjs-dist with column-aware spatial sorting
+      // Threshold: expect at least 200 chars per page — fixes partial extraction of multi-column PDFs
+      if (localText.length < numPages * 200) {
         try {
           const uint8 = new Uint8Array(file.buffer);
           const doc = await pdfjsLib.getDocument({ data: uint8, useWorkerFetch: false, isEvalSupported: false, useSystemFonts: true }).promise;
+          numPages = doc.numPages;
           const pages = [];
-          for (let i = 1; i <= doc.numPages; i++) {
+          for (let i = 1; i <= numPages; i++) {
             const page = await doc.getPage(i);
             const content = await page.getTextContent();
-            pages.push(content.items.map(item => item.str).join(" "));
+
+            const items = content.items
+              .filter(item => item.str && item.str.trim())
+              .map(item => ({
+                str: item.str,
+                x: Math.round(item.transform[4]),
+                y: Math.round(item.transform[5]),
+              }));
+
+            if (!items.length) { pages.push(""); continue; }
+
+            // Sort top-to-bottom (y descending) then left-to-right within each line
+            items.sort((a, b) => b.y - a.y || a.x - b.x);
+
+            // Group into visual lines using 3px y-tolerance, then sort each line by x
+            const lines = [];
+            let currentLine = [items[0]];
+            for (let j = 1; j < items.length; j++) {
+              if (Math.abs(items[j].y - currentLine[0].y) <= 3) {
+                currentLine.push(items[j]);
+              } else {
+                lines.push([...currentLine].sort((a, b) => a.x - b.x));
+                currentLine = [items[j]];
+              }
+            }
+            if (currentLine.length) lines.push([...currentLine].sort((a, b) => a.x - b.x));
+
+            pages.push(lines.map(line => line.map(item => item.str).join(" ")).join("\n"));
           }
-          localText = pages.join("\n").trim();
+          localText = pages.join("\n\n").trim();
         } catch { /* fall through */ }
       }
 
-      if (localText.length >= 60) {
+      if (localText.length >= numPages * 200) {
         return res.json({ text: localText, method: "pdf-local", chars: localText.length });
       }
 
@@ -1546,7 +1597,7 @@ router.post("/sessions/generate-starters", auth, async (req, res) => {
       ? criteria.map((c, i) => `${i + 1}. ${c}`).join("\n")
       : "Critères standards IMRAD";
 
-    const prompt = `Tu es expert en rédaction scientifique académique (articles IMRAD, mémoires PFE).
+    const prompt = `Tu es expert en rédaction scientifique académique (articles ).
 Génère exactement 5 amorces de phrases en français pour aider un étudiant à rédiger la section "${sectionName}" d'un ${docType === "memoire" ? "mémoire PFE" : "article scientifique"}.
 
 Critères d'évaluation de la section :
@@ -1706,6 +1757,36 @@ router.post("/sessions/:sessionId/self-assessment", auth, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error("[Self-assessment]", err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// PATCH /sessions/:sessionId/section-status — student sets status for a section
+router.patch("/sessions/:sessionId/section-status", auth, async (req, res) => {
+  try {
+    const { sectionKey, status } = req.body;
+    const VALID = ["not_started", "in_progress", "in_review", "needs_revision", "completed"];
+    if (!sectionKey || !VALID.includes(status))
+      return res.status(400).json({ message: "sectionKey et status (not_started|in_progress|in_review|needs_revision|completed) requis" });
+
+    const studentId = req.user.id;
+    const sessionId = req.params.sessionId;
+
+    const updated = await SessionSubmission.findOneAndUpdate(
+      { sessionId, studentId },
+      { $set: { [`sectionStatus.${sectionKey}`]: status } },
+      { sort: { round: -1 }, new: true }
+    );
+    if (!updated) {
+      await SessionSubmission.findOneAndUpdate(
+        { sessionId, studentId, round: 0 },
+        { $set: { [`sectionStatus.${sectionKey}`]: status }, $setOnInsert: { studentName: req.user.name || "" } },
+        { upsert: true }
+      );
+    }
+    res.json({ ok: true, sectionKey, status });
+  } catch (err) {
+    console.error("[Section-status]", err.message);
     res.status(500).json({ message: err.message });
   }
 });
