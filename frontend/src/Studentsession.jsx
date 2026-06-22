@@ -1294,6 +1294,22 @@ export default function StudentSession() {
               );
             })}
           </div>
+          {timeLeft !== null && (
+            <div style={{
+              ...styles.sideCard,
+              borderLeft: `4px solid ${timeLeft <= 60 ? "#ef4444" : timeLeft <= 300 ? "#f59e0b" : "#6366f1"}`,
+            }}>
+              <div style={styles.sideTitle}>⏱ Temps restant</div>
+              <div style={{
+                fontSize: 26, fontWeight: 900, fontVariantNumeric: "tabular-nums",
+                color: timeLeft <= 60 ? "#dc2626" : timeLeft <= 300 ? "#d97706" : "#4338ca",
+                letterSpacing: 1,
+              }}>
+                {String(Math.floor(timeLeft / 60)).padStart(2, "0")}:{String(timeLeft % 60).padStart(2, "0")}
+              </div>
+              {timeLeft <= 60 && <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 700, marginTop: 4 }}>⚠ Soumission automatique imminente</div>}
+            </div>
+          )}
           {aiFeedback && (
             <div style={{ ...styles.sideCard, borderLeft: "4px solid #6366f1" }}>
               <div style={styles.sideTitle}>Your AI Score</div>

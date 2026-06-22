@@ -114,6 +114,7 @@ export default function StudentDashboard() {
   const [isMobile,     setIsMobile]   = useState(() => window.innerWidth < 769);
   const [sidebarOpen,  setSidebarOpen] = useState(() => window.innerWidth >= 769);
   const [coursesOpen,  setCoursesOpen] = useState(false);
+  const [chatUnread,   setChatUnread]  = useState(() => parseInt(sessionStorage.getItem("chat_unread") || "0", 10) || 0);
 
   useEffect(() => {
     const onResize = () => {
@@ -166,6 +167,12 @@ export default function StudentDashboard() {
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  useEffect(() => {
+    const handler = (e) => setChatUnread(e.detail || 0);
+    window.addEventListener("chat:unread", handler);
+    return () => window.removeEventListener("chat:unread", handler);
+  }, []);
 
   useEffect(() => {
     const link = document.createElement("link");
@@ -277,7 +284,14 @@ export default function StudentDashboard() {
             }
             return (
               <div key={item.id} className={`nav-item ${activeNav === item.id ? "active" : ""}`} onClick={() => { handleNav(item); if (isMobile) setSidebarOpen(false); }}>
-                <span style={{ fontSize: 15, width: 20, textAlign: "center" }}>{item.icon}</span>
+                <span style={{ fontSize: 15, width: 20, textAlign: "center", position: "relative", display: "inline-block" }}>
+                  {item.icon}
+                  {item.id === "communication" && chatUnread > 0 && (
+                    <span style={{ position: "absolute", top: -5, right: -7, background: "#ef4444", color: "#fff", borderRadius: 99, minWidth: 15, height: 15, fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px", lineHeight: 1 }}>
+                      {chatUnread > 9 ? "9+" : chatUnread}
+                    </span>
+                  )}
+                </span>
                 {sidebarOpen && <span>{t(item.key)}</span>}
               </div>
             );

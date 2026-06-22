@@ -32,8 +32,10 @@ export default function Communication() {
   const [emailForm, setEmailForm] = useState({ to: "", subject: "", body: "" });
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
+  const [unreadCounts, setUnreadCounts] = useState({});
   const socketRef = useRef(null);
   const bottomRef = useRef(null);
+  const selectedRef = useRef(null);
 
   const back = user?.role === "teacher" ? "/teacher" : user?.role === "admin" ? "/admin" : "/student";
 
@@ -89,6 +91,7 @@ export default function Communication() {
 
   useEffect(() => {
     if (selected) loadMessages(selected._id);
+    selectedRef.current = selected;
   }, [selected, loadMessages]);
 
   useEffect(() => {
@@ -98,19 +101,44 @@ export default function Communication() {
     socketRef.current = socket;
     socket.emit("join_user_room");
     socket.on("chat_message", (m) => {
-      const fromId = m.from?._id || m.from;
-      const toId = m.to?._id || m.to;
-      if (selected && (fromId === selected._id || toId === selected._id)) {
+      const fromId = String(m.from?._id || m.from || "");
+      const toId   = String(m.to?._id   || m.to   || "");
+      const isCurrentConv = selectedRef.current &&
+        (fromId === selectedRef.current._id || toId === selectedRef.current._id);
+
+      if (isCurrentConv) {
         setMessages(prev => [...prev, m]);
+      } else {
+        // Incoming message from another conversation → increment unread
+        setUnreadCounts(prev => {
+          const next = { ...prev, [fromId]: (prev[fromId] || 0) + 1 };
+          const total = Object.values(next).reduce((a, b) => a + b, 0);
+          sessionStorage.setItem("chat_unread", String(total));
+          window.dispatchEvent(new CustomEvent("chat:unread", { detail: total }));
+          return next;
+        });
       }
       loadConversations();
     });
     return () => socket.disconnect();
-  }, [selected, loadConversations]);
+  }, [loadConversations]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const selectContact = (u) => {
+    setSelected(u);
+    if (unreadCounts[u._id]) {
+      setUnreadCounts(prev => {
+        const next = { ...prev, [u._id]: 0 };
+        const total = Object.values(next).reduce((a, b) => a + b, 0);
+        sessionStorage.setItem("chat_unread", String(total));
+        window.dispatchEvent(new CustomEvent("chat:unread", { detail: total }));
+        return next;
+      });
+    }
+  };
 
   const sendChat = async (e) => {
     e.preventDefault();
@@ -173,12 +201,22 @@ export default function Communication() {
           <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16, minHeight: 480 }}>
             <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #EAECF0", overflow: "hidden" }}>
               <p style={{ padding: "12px 14px", fontSize: 11, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase" }}>Contacts</p>
-              {[...contacts, ...conversations.map(c => c.user)].filter((u, i, arr) => u && arr.findIndex(x => x._id === u._id) === i).map(u => (
-                <div key={u._id} onClick={() => setSelected(u)} style={{ padding: "10px 14px", cursor: "pointer", background: selected?._id === u._id ? "#EEF2FF" : "transparent", borderBottom: "1px solid #F3F4F6" }}>
-                  <p style={{ fontSize: 13, fontWeight: 600 }}>{u.name}</p>
-                  <p style={{ fontSize: 11, color: "#9CA3AF" }}>{u.role === "teacher" ? "Enseignant" : "Apprenant"}</p>
-                </div>
-              ))}
+              {[...contacts, ...conversations.map(c => c.user)].filter((u, i, arr) => u && arr.findIndex(x => x._id === u._id) === i).map(u => {
+                const unread = unreadCounts[u._id] || 0;
+                return (
+                  <div key={u._id} onClick={() => selectContact(u)} style={{ padding: "10px 14px", cursor: "pointer", background: selected?._id === u._id ? "#EEF2FF" : "transparent", borderBottom: "1px solid #F3F4F6" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <p style={{ fontSize: 13, fontWeight: unread > 0 ? 700 : 600, color: unread > 0 ? "#1A1D23" : undefined }}>{u.name}</p>
+                      {unread > 0 && (
+                        <span style={{ background: "#ef4444", color: "#fff", borderRadius: "50%", minWidth: 18, height: 18, fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px", flexShrink: 0 }}>
+                          {unread > 9 ? "9+" : unread}
+                        </span>
+                      )}
+                    </div>
+                    <p style={{ fontSize: 11, color: "#9CA3AF" }}>{u.role === "teacher" ? "Enseignant" : "Apprenant"}</p>
+                  </div>
+                );
+              })}
             </div>
             <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #EAECF0", display: "flex", flexDirection: "column" }}>
               {selected ? (

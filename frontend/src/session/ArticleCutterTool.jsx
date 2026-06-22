@@ -195,12 +195,6 @@ const SECTION_DIFF = {
 };
 const DIFF_DOT = { simple: "#22c55e", intermediate: "#f59e0b", complex: "#ef4444" };
 
-const DEFAULT_STARTERS = {
-  Discussion:   ["Ces résultats indiquent que…", "Contrairement à [Auteur, année], nos résultats montrent que…", "Une limite de cette étude réside dans…", "Des recherches futures pourraient explorer…"],
-  Méthodes:     ["Cette étude adopte une approche [qualitative/quantitative/mixte]…", "Les participants ont été sélectionnés selon…", "Les données ont été collectées à l'aide de…", "L'analyse statistique a été réalisée avec…"],
-  Introduction: ["Dans le domaine de…, il est établi que…", "Cependant, peu d'études ont examiné…", "Cette étude a pour objectif de…", "Notre hypothèse de recherche est que…"],
-  "État de l'Art": ["Les travaux de [Auteur, année] ont montré que…", "Plusieurs approches ont été proposées pour…", "Notre contribution se distingue par…"],
-};
 
 const STATUS_CFG = {
   ready:     { dot: "#94a3b8", label: "Prêt",                 color: "#64748b" },
@@ -296,14 +290,12 @@ export default function ArticleCutterTool({
   const [structuredSections, setStructuredSections] = useState({}); // after clean+structure
   const [sectionsOpen, setSectionsOpen] = useState(true);
   const [formatsOpen, setFormatsOpen]   = useState(false);
-  const [amorcesOpen, setAmorcesOpen]   = useState(true);
 
   const taRef   = useRef(null);
   const fileRef = useRef(null);
   const dropRef = useRef(null);
 
   const effectiveSections = [...allSectionNames, ...customSections];
-  const currentStarters = sectionGuidance?.[missingSection] ?? DEFAULT_STARTERS[missingSection] ?? [];
 
   // Auto-detect sections whenever text changes and is substantial
   useEffect(() => {
@@ -491,14 +483,6 @@ export default function ArticleCutterTool({
     if (status !== "loaded") setStatus("loaded");
   };
 
-  // ── Starters helpers ──────────────────────────────────────
-  const updateStarter = (idx, val) => {
-    const arr = [...currentStarters]; arr[idx] = val;
-    onUpdateGuidance?.(missingSection, arr);
-  };
-  const removeStarter = (idx) => onUpdateGuidance?.(missingSection, currentStarters.filter((_, i) => i !== idx));
-  const addStarter    = ()     => onUpdateGuidance?.(missingSection, [...currentStarters, ""]);
-
   // ── Status badge ──────────────────────────────────────────
   const effectiveStatus = extractLoading && !extractDone ? "extracting" : status;
   const STATUS_CFG_EXT = {
@@ -645,28 +629,6 @@ export default function ArticleCutterTool({
           ))}
         </div>
 
-        {/* Starters */}
-        {missingSection && (
-          <div style={s.sideBlock}>
-            <div style={{ ...s.sideLabel, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", userSelect: "none", marginBottom: amorcesOpen ? 10 : 0 }} onClick={() => setAmorcesOpen(o => !o)}>
-              <span>💡 Amorces — {missingSection}</span>
-              <span style={{ fontSize: 9, color: "#94a3b8", display: "inline-block", transition: "transform .2s", transform: amorcesOpen ? "rotate(90deg)" : "rotate(0deg)" }}>▶</span>
-            </div>
-            {amorcesOpen && (
-              <>
-                {currentStarters.map((st, i) => (
-                  <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ fontSize: 12, color: "#94a3b8", minWidth: 14 }}>{i + 1}.</span>
-                    <input type="text" value={st} onChange={e => updateStarter(i, e.target.value)}
-                      style={s.starterInput} placeholder={`Amorce ${i + 1}…`} />
-                    <button type="button" onClick={() => removeStarter(i)} style={s.xBtn}>×</button>
-                  </div>
-                ))}
-                <button type="button" onClick={addStarter} style={s.addStarterBtn}>+ Ajouter une amorce</button>
-              </>
-            )}
-          </div>
-        )}
       </div>
 
       {/* ── Main area ── */}
